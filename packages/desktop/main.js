@@ -39,6 +39,7 @@ async function start() {
     fullscreen: true,
     alwaysOnTop: true,
     backgroundColor: '#000000',
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

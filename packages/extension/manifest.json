@@ -1,9 +1,13 @@
 {
   "manifest_version": 3,
   "name": "ragequit",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Had a rough day? Smash this webpage. Virtually. Nothing real is harmed.",
   "permissions": ["activeTab", "scripting"],
   "background": { "service_worker": "background.js" },
-  "action": { "default_title": "Smash this page (click again to stop)" }
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": {
+    "default_title": "Smash this page (click again to stop)",
+    "default_icon": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+  }
 }

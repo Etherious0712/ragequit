@@ -1,0 +1,100 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="cache-control" content="no-store">
+<title>ragequit icon generator</title>
+<!--
+  Procedural source for the app icons (no binary source assets). Renders the
+  "cracked screen" logo mark at each size and exposes PNG data URLs on
+  window.__ICONS__ for export. Regenerate: open this page, read window.__ICONS__.
+
+  Committed outputs: packages/extension/icons/{16,48,128}.png and
+  packages/desktop/icon.png. ponytail: desktop/icon.png currently uses the 128px
+  render; regenerate it from the 256 output when packaging the installer (F20).
+-->
+<body style="background:#333;color:#eee;font-family:sans-serif">
+<h1>ragequit icons</h1>
+<div id="out"></div>
+<script>
+  // Deterministic cracked-screen mark, FLAT colors (no gradients) so it reads
+  // crisp at 16px and the PNG compresses small. Fixed geometry = same logo at
+  // every size.
+  function drawIcon(ctx, size) {
+    const c = size / 2;
+    ctx.clearRect(0, 0, size, size);
+
+    // flat charcoal rounded tile
+    const r = size * 0.16;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, size, size, r);
+    ctx.fillStyle = '#1a1a20';
+    ctx.fill();
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(0, 0, size, size, r);
+    ctx.clip();
+
+    const cracks = 9;
+    const kink = [0.18, -0.22, 0.12, -0.15, 0.24, -0.1, 0.16, -0.2, 0.13];
+    const reach = [0.86, 0.72, 0.9, 0.66, 0.8, 0.74, 0.88, 0.7, 0.82];
+    const pts = [];
+    for (let i = 0; i < cracks; i++) {
+      const a0 = (i / cracks) * Math.PI * 2 - 0.4;
+      const far = size * 0.52 * reach[i];
+      const midA = a0 + kink[i];
+      pts.push([[c, c], [c + Math.cos(a0) * far * 0.5, c + Math.sin(a0) * far * 0.5],
+                [c + Math.cos(midA) * far, c + Math.sin(midA) * far]]);
+    }
+    const stroke = (color, w) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = w;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const p of pts) {
+        ctx.beginPath();
+        ctx.moveTo(p[0][0], p[0][1]);
+        ctx.lineTo(p[1][0], p[1][1]);
+        ctx.lineTo(p[2][0], p[2][1]);
+        ctx.stroke();
+      }
+    };
+    stroke('#0a0e16', Math.max(1.5, size * 0.045)); // dark outline for depth
+    stroke('#cfe6ff', Math.max(0.8, size * 0.02));  // bright icy crack
+
+    // connecting web ring (flat)
+    ctx.strokeStyle = '#8fb8e6';
+    ctx.lineWidth = Math.max(0.8, size * 0.012);
+    const ring = size * 0.24;
+    ctx.beginPath();
+    for (let i = 0; i < cracks; i++) {
+      const a = (i / cracks) * Math.PI * 2 - 0.4 + kink[i] * 0.5;
+      const x = c + Math.cos(a) * ring, y = c + Math.sin(a) * ring;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // flat impact core: two concentric discs
+    ctx.fillStyle = '#7db4ff';
+    ctx.beginPath();
+    ctx.arc(c, c, size * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(c, c, size * 0.075, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  const sizes = [16, 48, 128, 256];
+  window.__ICONS__ = {};
+  const out = document.getElementById('out');
+  for (const s of sizes) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = s;
+    drawIcon(cv.getContext('2d'), s);
+    window.__ICONS__[s] = cv.toDataURL('image/png');
+    cv.style.cssText = 'margin:8px;background:#555;image-rendering:pixelated;width:' + Math.max(s, 64) + 'px';
+    out.appendChild(cv);
+  }
+</script>
+</body>
