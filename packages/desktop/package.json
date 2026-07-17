@@ -1,0 +1,13 @@
+{
+  "name": "ragequit-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Fake desktop destruction toy",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.1.1"
+  }
+}

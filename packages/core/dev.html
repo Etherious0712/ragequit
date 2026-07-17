@@ -1,0 +1,14 @@
+<!doctype html>
+<!-- Dev harness: loads engine source directly (same order as scripts/sync.js). -->
+<meta charset="utf-8">
+<title>ragequit dev harness</title>
+<body style="font-family:sans-serif;background:linear-gradient(135deg,#e0f2ff,#ffe8d6);height:200vh;margin:24px">
+<h1>Pretend this is your annoying screen</h1>
+<p>Click to smash. R = reset, Esc = quit. Scroll: damage must stay fixed to the viewport.</p>
+<button style="font-size:24px">A very smashable button</button>
+<script>
+  // cache-busted loads so engine edits always show on reload (same order as scripts/sync.js)
+  for (const s of ['tools/hammer.js', 'destroy.js'])
+    document.write('<script src="' + s + '?t=' + Date.now() + '"><\/script>');
+</script>
+</body>

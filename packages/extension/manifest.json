@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "ragequit",
+  "version": "0.1.0",
+  "description": "Had a rough day? Smash this webpage. Virtually. Nothing real is harmed.",
+  "permissions": ["activeTab", "scripting"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Smash this page (click again to stop)" }
+}

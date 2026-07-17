@@ -1,0 +1,10 @@
+{
+  "name": "ragequit",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Fake screen destruction toy — decompress by smashing your screen (virtually)",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "sync": "node scripts/sync.js"
+  }
+}
