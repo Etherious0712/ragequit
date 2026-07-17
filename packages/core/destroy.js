@@ -57,10 +57,11 @@
 
   // ---- audio (lazy: created on first hit to satisfy autoplay policies) ----
   let ac = null;
-  let master = null; // shared compressor: rapid clicks stack without clipping
-  function playSound() {
+  let master = null;   // shared compressor: rapid clicks stack without clipping
+  let loopStop = null; // stop function of the active soundLoop, if any
+  function ensureAudio() {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
+    if (!AC) return null;
     if (!ac) {
       ac = new AC();
       master = ac.createDynamicsCompressor();
@@ -71,7 +72,16 @@
       master.connect(ac.destination);
     }
     if (ac.state === 'suspended') ac.resume();
-    tool.sound(ac, master);
+    return ac;
+  }
+  function playSound() {
+    if (ensureAudio()) tool.sound(ac, master);
+  }
+  function startLoop() {
+    if (!loopStop && tool.soundLoop && ensureAudio()) loopStop = tool.soundLoop(ac, master);
+  }
+  function stopLoop() {
+    if (loopStop) { loopStop(); loopStop = null; }
   }
 
   // ---- weapon arming ----
@@ -160,11 +170,13 @@
 
   function fireOnce(x, y) {
     tool.hit(ctx, x, y);
-    playSound();
+    if (tool.soundLoop) startLoop(); // looping weapons roar continuously instead of per-hit
+    else playSound();
     if (tool.frame) startFx();
   }
 
   function stopAuto() {
+    stopLoop();
     if (!autoTimer) return;
     clearInterval(autoTimer);
     autoTimer = 0;
