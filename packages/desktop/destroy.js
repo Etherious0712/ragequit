@@ -2318,9 +2318,29 @@
   }
 
   // ---- audio (lazy: created on first hit to satisfy autoplay policies) ----
+  // graph: tools → master (compressor) → masterGain (volume/mute) → destination
   let ac = null;
-  let master = null;   // shared compressor: rapid clicks stack without clipping
-  let loopStop = null; // stop function of the active soundLoop, if any
+  let master = null;     // shared compressor: rapid clicks stack without clipping
+  let masterGain = null; // volume + mute gate, after the compressor
+  let loopStop = null;   // stop function of the active soundLoop, if any
+
+  // persisted audio prefs (namespaced; per-origin in the extension — fine for a toy)
+  let volume = 0.8, muted = false;
+  try {
+    const v = localStorage.getItem('ragequit.vol');
+    if (v !== null) volume = Math.max(0, Math.min(1, parseFloat(v) || 0));
+    muted = localStorage.getItem('ragequit.mute') === '1';
+  } catch (e) {}
+  function applyVolume() {
+    if (masterGain) masterGain.gain.value = muted ? 0 : volume;
+  }
+  function persistAudio() {
+    try {
+      localStorage.setItem('ragequit.vol', String(volume));
+      localStorage.setItem('ragequit.mute', muted ? '1' : '0');
+    } catch (e) {}
+  }
+
   function ensureAudio() {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
@@ -2331,7 +2351,10 @@
       master.ratio.value = 12;
       master.attack.value = 0.003;
       master.release.value = 0.15;
-      master.connect(ac.destination);
+      masterGain = ac.createGain();
+      master.connect(masterGain);
+      masterGain.connect(ac.destination);
+      applyVolume();
     }
     if (ac.state === 'suspended') ac.resume();
     return ac;
@@ -2383,6 +2406,32 @@
     return b;
   }
 
+  // speaker glyph: cone + waves (louder = more waves), or a red X when muted
+  function drawSpeakerGlyph(g, size, level) {
+    const s = size / 24;
+    g.clearRect(0, 0, size, size);
+    g.fillStyle = '#eee';
+    g.beginPath();
+    g.moveTo(3 * s, 9 * s); g.lineTo(7 * s, 9 * s); g.lineTo(11 * s, 5 * s);
+    g.lineTo(11 * s, 19 * s); g.lineTo(7 * s, 15 * s); g.lineTo(3 * s, 15 * s);
+    g.closePath();
+    g.fill();
+    g.lineCap = 'round';
+    if (level <= 0) {
+      g.strokeStyle = '#ff6a5a';
+      g.lineWidth = 1.8 * s;
+      g.beginPath();
+      g.moveTo(15 * s, 9 * s); g.lineTo(21 * s, 15 * s);
+      g.moveTo(21 * s, 9 * s); g.lineTo(15 * s, 15 * s);
+      g.stroke();
+    } else {
+      g.strokeStyle = '#eee';
+      g.lineWidth = 1.5 * s;
+      g.beginPath(); g.arc(13 * s, 12 * s, 3 * s, -0.6, 0.6); g.stroke();
+      if (level > 0.5) { g.beginPath(); g.arc(13 * s, 12 * s, 6 * s, -0.6, 0.6); g.stroke(); }
+    }
+  }
+
   tools.forEach((t, i) => {
     const icon = makeCanvas(24, 24);
     t.icon(icon.getContext('2d'), 24);
@@ -2394,6 +2443,41 @@
   bar.appendChild(divider);
   barBtn(String.fromCharCode(0x21ba), 'Reset (R)', reset);
   barBtn(String.fromCharCode(0x2715), 'Quit (Esc)', quit);
+
+  // audio: speaker = mute toggle; volume slider pops out to the right on hover
+  const spkCanvas = makeCanvas(24, 24);
+  const spkCtx = spkCanvas.getContext('2d');
+  const drawSpeaker = () => drawSpeakerGlyph(spkCtx, 24, muted ? 0 : volume);
+
+  const audioWrap = doc.createElement('div');
+  audioWrap.style.cssText = 'position:relative;display:flex;align-items:center;justify-content:center;width:30px;height:30px;';
+  const spkBtn = doc.createElement('button');
+  spkBtn.appendChild(spkCanvas);
+  spkBtn.title = 'Mute (click) / volume (hover)';
+  spkBtn.style.cssText = 'all:unset;cursor:pointer;width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;';
+  spkBtn.onclick = () => { muted = !muted; applyVolume(); persistAudio(); drawSpeaker(); };
+
+  const sliderBox = doc.createElement('div');
+  sliderBox.style.cssText =
+    'position:absolute;left:30px;top:0;height:30px;display:flex;align-items:center;padding:0 6px;' +
+    'background:rgba(20,20,28,0.92);border-radius:0 8px 8px 0;opacity:0;visibility:hidden;transition:opacity .12s ease;';
+  const slider = doc.createElement('input');
+  slider.type = 'range';
+  slider.min = '0'; slider.max = '1'; slider.step = '0.01';
+  slider.value = String(volume);
+  slider.style.cssText = 'width:72px;accent-color:#e0472f;cursor:pointer;';
+  slider.oninput = () => {
+    volume = parseFloat(slider.value);
+    if (volume > 0) muted = false; // dragging up unmutes
+    applyVolume(); persistAudio(); drawSpeaker();
+  };
+  sliderBox.appendChild(slider);
+  audioWrap.appendChild(spkBtn);
+  audioWrap.appendChild(sliderBox);
+  audioWrap.onmouseenter = () => { sliderBox.style.opacity = '1'; sliderBox.style.visibility = 'visible'; };
+  audioWrap.onmouseleave = () => { sliderBox.style.opacity = '0'; sliderBox.style.visibility = 'hidden'; };
+  bar.appendChild(audioWrap);
+  drawSpeaker();
 
   // auto-hide: collapse to a 6px sliver, peek out on hover
   const collapse = () => (bar.style.marginLeft = 6 - bar.offsetWidth + 'px');
