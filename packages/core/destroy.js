@@ -55,6 +55,31 @@
     requestAnimationFrame(fxTick);
   }
 
+  // ---- screen shake: jolts both canvases via CSS transform, eased decay.
+  // Exposed on the public API so weapons (dynamite) trigger it without
+  // reaching into engine-owned DOM. Works identically in extension & desktop.
+  let shakeStart = 0, shakeEnd = 0, shakeMag = 0, shakeRAF = 0;
+  function shakeStep() {
+    const now = performance.now();
+    if (now >= shakeEnd) {
+      canvas.style.transform = fx.style.transform = '';
+      shakeRAF = 0;
+      return;
+    }
+    const k = 1 - (now - shakeStart) / (shakeEnd - shakeStart); // 1 → 0
+    const m = shakeMag * k * k;
+    const t = 'translate(' + ((Math.random() * 2 - 1) * m).toFixed(1) + 'px,' +
+              ((Math.random() * 2 - 1) * m).toFixed(1) + 'px)';
+    canvas.style.transform = fx.style.transform = t;
+    shakeRAF = requestAnimationFrame(shakeStep);
+  }
+  function shake(mag, dur) {
+    shakeStart = performance.now();
+    shakeEnd = shakeStart + dur;
+    shakeMag = mag;
+    if (!shakeRAF) shakeRAF = requestAnimationFrame(shakeStep);
+  }
+
   // ---- audio (lazy: created on first hit to satisfy autoplay policies) ----
   let ac = null;
   let master = null;   // shared compressor: rapid clicks stack without clipping
@@ -151,6 +176,7 @@
     removeEventListener('blur', stopAuto);
     stopAuto();
     fxRunning = false;
+    if (shakeRAF) cancelAnimationFrame(shakeRAF);
     canvas.remove();
     fx.remove();
     bar.remove();
@@ -207,6 +233,7 @@
     if (e.key === 'Escape') { e.stopPropagation(); quit(); }
     else if (e.key === 'r' || e.key === 'R') { e.stopPropagation(); reset(); }
     else if (e.key >= '1' && e.key <= '9') { e.stopPropagation(); arm(+e.key - 1); }
+    else if (e.key === '0') { e.stopPropagation(); arm(9); } // 0 = 10th weapon
   }
 
   addEventListener('resize', resize);
@@ -218,5 +245,5 @@
   arm(0);
   collapse();
 
-  window.__SMASH__ = { quit: quit, reset: reset };
+  window.__SMASH__ = { quit: quit, reset: reset, shake: shake };
 })();
