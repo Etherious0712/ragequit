@@ -97,11 +97,11 @@
     },
 
     // Thunk: noise burst through a lowpass + fast-decaying low sine. Random pitch.
-    sound(ac) {
+    sound(ac, dest) {
       const t = ac.currentTime;
       const out = ac.createGain();
       out.gain.setValueAtTime(0.5, t);
-      out.connect(ac.destination);
+      out.connect(dest || ac.destination);
 
       // noise burst
       const len = ac.sampleRate * 0.12 | 0;

@@ -8,7 +8,7 @@
 <button style="font-size:24px">A very smashable button</button>
 <script>
   // cache-busted loads so engine edits always show on reload (same order as scripts/sync.js)
-  for (const s of ['tools/hammer.js', 'destroy.js'])
+  for (const s of ['tools/10-hammer.js', 'tools/20-cracks.js', 'destroy.js'])
     document.write('<script src="' + s + '?t=' + Date.now() + '"><\/script>');
 </script>
 </body>
