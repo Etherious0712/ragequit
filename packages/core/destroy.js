@@ -13,19 +13,47 @@
   const doc = document;
 
   // ---- overlay canvas (fixed to the viewport — damage sticks to the "glass") ----
+  // plus an fx canvas above it: cleared every frame, for transient animation
+  // (casings, particles) driven by tools' optional frame(fxCtx, dt, w, h).
   const canvas = doc.createElement('canvas');
   canvas.style.cssText = 'position:fixed;inset:0;z-index:' + Z + ';';
   const ctx = canvas.getContext('2d');
+  const fx = doc.createElement('canvas');
+  fx.style.cssText = 'position:fixed;inset:0;z-index:' + Z + ';pointer-events:none;';
+  const fxCtx = fx.getContext('2d');
 
-  function resize() {
+  function sizeCanvas(c, c2d) {
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = innerWidth * dpr;
-    canvas.height = innerHeight * dpr;
-    canvas.style.width = innerWidth + 'px';
-    canvas.style.height = innerHeight + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels; damage wipes on resize (fine for a toy)
+    c.width = innerWidth * dpr;
+    c.height = innerHeight * dpr;
+    c.style.width = innerWidth + 'px';
+    c.style.height = innerHeight + 'px';
+    c2d.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
+  }
+  function resize() {
+    sizeCanvas(canvas, ctx); // damage wipes on resize (fine for a toy)
+    sizeCanvas(fx, fxCtx);
   }
   resize();
+
+  // ---- fx loop: runs only while some tool still has live particles ----
+  let fxRunning = false;
+  let fxLast = 0;
+  function fxTick(t) {
+    const dt = Math.min((t - fxLast) / 1000, 0.05);
+    fxLast = t;
+    fxCtx.clearRect(0, 0, innerWidth, innerHeight);
+    let live = false;
+    for (const tl of tools) if (tl.frame && tl.frame(fxCtx, dt, innerWidth, innerHeight)) live = true;
+    if (live && fxRunning) requestAnimationFrame(fxTick);
+    else { fxRunning = false; fxCtx.clearRect(0, 0, innerWidth, innerHeight); }
+  }
+  function startFx() {
+    if (fxRunning) return;
+    fxRunning = true;
+    fxLast = performance.now();
+    requestAnimationFrame(fxTick);
+  }
 
   // ---- audio (lazy: created on first hit to satisfy autoplay policies) ----
   let ac = null;
@@ -55,6 +83,7 @@
 
   function arm(i) {
     if (!tools[i]) return;
+    stopAuto(); // switching weapons mid-burst stops the burst
     tool = tools[i];
     cursors = tool.cursor(makeCanvas);
     canvas.style.cursor = cursors.idle;
@@ -108,7 +137,12 @@
   function quit() {
     removeEventListener('resize', resize);
     removeEventListener('keydown', onKey, true);
+    removeEventListener('mouseup', stopAuto);
+    removeEventListener('blur', stopAuto);
+    stopAuto();
+    fxRunning = false;
     canvas.remove();
+    fx.remove();
     bar.remove();
     clearTimeout(swingTimer);
     if (ac) ac.close();
@@ -121,15 +155,41 @@
   }
 
   // ---- input ----
+  let mx = 0, my = 0;      // tracked cursor for auto-fire follow
+  let autoTimer = 0;       // interval id while holding an auto weapon
+
+  function fireOnce(x, y) {
+    tool.hit(ctx, x, y);
+    playSound();
+    if (tool.frame) startFx();
+  }
+
+  function stopAuto() {
+    if (!autoTimer) return;
+    clearInterval(autoTimer);
+    autoTimer = 0;
+    if (cursors) canvas.style.cursor = cursors.idle;
+  }
+
+  canvas.addEventListener('mousemove', (e) => { mx = e.clientX; my = e.clientY; });
+
   canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    tool.hit(ctx, e.clientX, e.clientY);
-    playSound();
+    mx = e.clientX; my = e.clientY;
+    fireOnce(mx, my);
     canvas.style.cursor = cursors.swung;
-    clearTimeout(swingTimer);
-    swingTimer = setTimeout(() => (canvas.style.cursor = cursors.idle), 100);
+    if (tool.auto) {
+      // hold = keep firing at the cursor until release
+      autoTimer = setInterval(() => fireOnce(mx, my), tool.auto);
+    } else {
+      clearTimeout(swingTimer);
+      swingTimer = setTimeout(() => (canvas.style.cursor = cursors.idle), 100);
+    }
   });
+
+  addEventListener('mouseup', stopAuto);
+  addEventListener('blur', stopAuto);
 
   function onKey(e) {
     if (e.key === 'Escape') { e.stopPropagation(); quit(); }
@@ -141,6 +201,7 @@
   addEventListener('keydown', onKey, true);
 
   doc.documentElement.appendChild(canvas);
+  doc.documentElement.appendChild(fx);
   doc.documentElement.appendChild(bar);
   arm(0);
   collapse();
