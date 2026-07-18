@@ -11,7 +11,7 @@
   packages/desktop/icon.png. ponytail: desktop/icon.png currently uses the 128px
   render; regenerate it from the 256 output when packaging the installer (F20).
 -->
-<body style="background:#333;color:#eee;font-family:sans-serif">
+<body style="background:#333;color:#eee;font-family:sans-serif;margin:20px">
 <h1>ragequit icons</h1>
 <div id="out"></div>
 <script>
@@ -85,6 +85,8 @@
     ctx.restore();
   }
 
+  // 16/48/128 = extension; 256 = desktop app (electron-builder minimum). For
+  // crisper Windows taskbar/Explorer icons, bump the desktop export to 512.
   const sizes = [16, 48, 128, 256];
   window.__ICONS__ = {};
   const out = document.getElementById('out');

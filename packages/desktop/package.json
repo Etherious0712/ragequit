@@ -1,13 +1,30 @@
 {
   "name": "ragequit-desktop",
   "private": true,
-  "version": "0.13.0",
-  "description": "Fake desktop destruction toy",
+  "version": "0.14.0",
+  "description": "Fake desktop destruction toy — smash a frozen screenshot of your desktop",
+  "author": "Etherious0712",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
   },
   "devDependencies": {
-    "electron": "^43.1.1"
+    "electron": "^43.1.1",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.etherious.ragequit",
+    "productName": "ragequit",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "index.html", "destroy.js", "icon.png"],
+    "win": { "target": "nsis", "icon": "icon.png" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "publish": { "provider": "github", "owner": "Etherious0712", "repo": "ragequit" }
   }
 }

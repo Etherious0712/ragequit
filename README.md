@@ -41,3 +41,14 @@ npm run sync   # copies the concatenated engine into extension/ and desktop/
 ```
 
 App icons are generated from procedural canvas code — open `scripts/make-icons.html` to regenerate them; there are no hand-drawn binary assets.
+
+### Packaging the desktop app
+
+From the repo root run a real `npm install` (the build toolchain isn't fetched by the lockfile-only step), then:
+
+```
+npm run dist -w ragequit-desktop   # → packages/desktop/dist/ (Windows NSIS installer)
+```
+
+The build is unsigned, so Windows SmartScreen shows an "unknown publisher" prompt once. The installed app checks GitHub Releases for updates on launch and offers a download link when a newer version exists (no silent auto-install — keeps the zero-dependency rule).
+
