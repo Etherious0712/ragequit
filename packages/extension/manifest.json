@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ragequit",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Had a rough day? Smash this webpage. Virtually. Nothing real is harmed.",
   "permissions": ["activeTab", "scripting"],
   "background": { "service_worker": "background.js" },

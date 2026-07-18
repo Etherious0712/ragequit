@@ -24,7 +24,7 @@ Pick a weapon from the slim toolbar on the left edge (hover to reveal it), or pr
 | 9 | **Termites** | Drop a swarm that wanders and gnaws holes on its own. |
 | 0 | **Dynamite** | Plant a stick with a burning fuse — flash, screen-shake, crater, cracks to the edges. |
 
-A speaker button at the bottom of the toolbar mutes/adjusts volume (remembered across sessions).
+The toolbar also has a 📷 button to save a screenshot of your carnage (page/desktop + damage composited into a PNG), and a speaker button to mute or adjust volume (remembered across sessions).
 
 ## Try it
 

@@ -11,6 +11,8 @@
   // Show the frozen desktop, then arm the engine on top of it.
   window.__SMASH_DESKTOP__.shot().then((url) => {
     document.getElementById('shot').src = url;
+    // save-the-carnage backdrop = the frozen screenshot (already clean of our UI)
+    window.__SMASH_HOST__ = { capture: () => Promise.resolve(url) };
     const s = document.createElement('script');
     s.src = 'destroy.js';
     document.body.appendChild(s);

@@ -2406,6 +2406,25 @@
     return b;
   }
 
+  // camera glyph for the save button
+  function drawCameraGlyph(g, size) {
+    const s = size / 24;
+    g.clearRect(0, 0, size, size);
+    g.fillStyle = '#eee';
+    g.beginPath();
+    g.roundRect(3 * s, 8 * s, 18 * s, 12 * s, 2 * s);
+    g.fill();
+    g.fillRect(8.5 * s, 5.5 * s, 5 * s, 3 * s); // top bump
+    g.fillStyle = '#1a1a20';
+    g.beginPath();
+    g.arc(12 * s, 14 * s, 4 * s, 0, Math.PI * 2); // lens
+    g.fill();
+    g.fillStyle = '#7db4ff';
+    g.beginPath();
+    g.arc(12 * s, 14 * s, 2.1 * s, 0, Math.PI * 2); // lens glint
+    g.fill();
+  }
+
   // speaker glyph: cone + waves (louder = more waves), or a red X when muted
   function drawSpeakerGlyph(g, size, level) {
     const s = size / 24;
@@ -2441,6 +2460,9 @@
   const divider = doc.createElement('div');
   divider.style.cssText = 'width:22px;height:1px;background:rgba(255,255,255,0.25);margin:3px 0;';
   bar.appendChild(divider);
+  const camIcon = makeCanvas(24, 24);
+  drawCameraGlyph(camIcon.getContext('2d'), 24);
+  barBtn(camIcon, 'Save a screenshot', save);
   barBtn(String.fromCharCode(0x21ba), 'Reset (R)', reset);
   barBtn(String.fromCharCode(0x2715), 'Quit (Esc)', quit);
 
@@ -2490,6 +2512,93 @@
     tools.forEach((t) => t.reset && t.reset());
   }
 
+  // Save the carnage: composite the backdrop (from the host, if any) + the
+  // persistent damage canvas into one PNG, and offer it in a preview modal.
+  // Host contract: window.__SMASH_HOST__.capture() → Promise<dataURL|null>,
+  // returning the clean backdrop WITHOUT our overlays (desktop = the frozen
+  // screenshot; extension = captureVisibleTab of the page). UI is excluded by
+  // hiding our canvases/toolbar while the host captures.
+  let saving = false;
+  let previewDim = null; // the open save-preview modal, if any (tracked so Esc/quit handle it)
+  async function save() {
+    if (saving) return;
+    saving = true;
+    try {
+      const host = window.__SMASH_HOST__;
+      let backdrop = null;
+      if (host && host.capture) {
+        const prev = [bar, fx, canvas].map((el) => el.style.display);
+        bar.style.display = fx.style.display = canvas.style.display = 'none';
+        try {
+          // setTimeout (not rAF) so the hide still lands even if rendering is throttled
+          await new Promise((r) => setTimeout(r, 32));
+          backdrop = await host.capture();
+        } catch (e) { backdrop = null; }
+        [bar, fx, canvas].forEach((el, i) => (el.style.display = prev[i]));
+      }
+
+      const W = canvas.width, H = canvas.height;
+      const out = makeCanvas(W, H);
+      const octx = out.getContext('2d');
+      let noteBackdropMissing = !!(host && host.capture) && !backdrop;
+      if (backdrop) {
+        await new Promise((res) => {
+          const img = new Image();
+          img.onload = () => { octx.drawImage(img, 0, 0, W, H); octx.drawImage(canvas, 0, 0); res(); };
+          img.onerror = () => { noteBackdropMissing = true; octx.drawImage(canvas, 0, 0); res(); };
+          img.src = backdrop;
+        });
+      } else {
+        octx.drawImage(canvas, 0, 0);
+      }
+      showPreview(out, noteBackdropMissing);
+    } finally {
+      saving = false; // never let the button dead-lock, even on an error
+    }
+  }
+
+  function showPreview(outCanvas, backdropMissing) {
+    const dim = doc.createElement('div');
+    dim.style.cssText =
+      'position:fixed;inset:0;z-index:' + Z + ';background:rgba(0,0,0,0.75);' +
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;' +
+      'font:14px/1.4 system-ui,sans-serif;color:#eee;';
+    const img = doc.createElement('img');
+    img.src = outCanvas.toDataURL('image/png');
+    img.style.cssText = 'max-width:80vw;max-height:66vh;border:1px solid rgba(255,255,255,0.2);box-shadow:0 8px 40px rgba(0,0,0,0.6);';
+    dim.appendChild(img);
+    if (backdropMissing) {
+      const note = doc.createElement('div');
+      note.textContent = "Couldn't capture the page — saved the damage layer only.";
+      note.style.opacity = '0.85';
+      dim.appendChild(note);
+    }
+    const row = doc.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;';
+    const close = () => { dim.remove(); previewDim = null; };
+    const mkBtn = (label, bg, onClick) => {
+      const b = doc.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'all:unset;cursor:pointer;padding:9px 18px;border-radius:8px;background:' + bg + ';color:#fff;font-weight:600;';
+      b.onclick = onClick;
+      return b;
+    };
+    row.appendChild(mkBtn('Download', '#e0472f', () => {
+      outCanvas.toBlob((blob) => {
+        const a = doc.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'ragequit.png';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        close();
+      }, 'image/png');
+    }));
+    row.appendChild(mkBtn('Cancel', 'rgba(255,255,255,0.15)', close));
+    dim.appendChild(row);
+    doc.documentElement.appendChild(dim);
+    previewDim = dim;
+  }
+
   function quit() {
     removeEventListener('resize', resize);
     removeEventListener('keydown', onKey, true);
@@ -2501,6 +2610,7 @@
     canvas.remove();
     fx.remove();
     bar.remove();
+    if (previewDim) { previewDim.remove(); previewDim = null; } // don't leak an open preview
     clearTimeout(swingTimer);
     if (ac) ac.close();
     tools.forEach((t) => t.reset && t.reset());
@@ -2551,6 +2661,12 @@
   addEventListener('blur', stopAuto);
 
   function onKey(e) {
+    // while the save preview is open it owns the keyboard: Esc closes it, nothing else fires
+    if (previewDim) {
+      if (e.key === 'Escape') { e.stopPropagation(); previewDim.remove(); previewDim = null; }
+      else e.stopPropagation();
+      return;
+    }
     if (e.key === 'Escape') { e.stopPropagation(); quit(); }
     else if (e.key === 'r' || e.key === 'R') { e.stopPropagation(); reset(); }
     else if (e.key >= '1' && e.key <= '9') { e.stopPropagation(); arm(+e.key - 1); }
