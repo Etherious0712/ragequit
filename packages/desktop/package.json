@@ -1,7 +1,7 @@
 {
   "name": "ragequit-desktop",
   "private": true,
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Fake desktop destruction toy — smash a frozen screenshot of your desktop",
   "author": "Etherious0712",
   "main": "main.js",

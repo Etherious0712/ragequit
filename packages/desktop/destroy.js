@@ -2616,6 +2616,7 @@
     tools.forEach((t) => t.reset && t.reset());
     delete window.__SMASH__;
     delete window.__SMASH_TOOLS__; // concat re-registers tools on next injection
+    delete window.__SMASH_HOST__;  // extension re-injects host.js; desktop is closing anyway
     // desktop app: quitting the toy quits the app (bridge set by desktop preload)
     const d = window.__SMASH_DESKTOP__;
     if (d) d.quit ? d.quit() : window.close();

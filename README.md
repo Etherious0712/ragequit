@@ -32,6 +32,15 @@ The toolbar also has a 📷 button to save a screenshot of your carnage (page/de
 
 **Desktop**: `cd packages/desktop && npm install && npm start`. It captures the monitor under your cursor and lets you destroy the frozen image. `Esc` quits, `R` resets.
 
+## Privacy
+
+ragequit collects nothing and transmits nothing. There are no accounts, no analytics,
+and no network requests — all art is drawn on the fly and all sound is synthesized in
+the browser. The extension only touches a page after you click its toolbar button
+(`activeTab`), and the "save screenshot" feature composites the image locally and hands
+it straight to your browser's download; it is never uploaded anywhere. The desktop app's
+only network call is an optional check of GitHub Releases for a newer version.
+
 ## Development
 
 Engine source lives only in `packages/core`. After editing it:
