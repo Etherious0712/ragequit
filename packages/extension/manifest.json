@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ragequit",
-  "version": "0.15.0",
+  "version": "1.0.0",
   "description": "Had a rough day? Smash this webpage. Virtually. Nothing real is harmed.",
   "homepage_url": "https://github.com/Etherious0712/ragequit",
   "permissions": ["activeTab", "scripting"],
