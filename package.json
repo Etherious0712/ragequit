@@ -6,6 +6,7 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "sync": "node scripts/sync.js",
+    "icons": "node scripts/make-icons.js",
     "zip:ext": "node scripts/zip-extension.js"
   }
 }

@@ -66,7 +66,15 @@ Engine source lives only in `packages/core`. After editing it:
 npm run sync   # copies the concatenated engine into extension/ and desktop/
 ```
 
-App icons are generated from procedural canvas code — open `scripts/make-icons.html` to regenerate them; there are no hand-drawn binary assets.
+App icons are generated from procedural code — no hand-drawn binary assets:
+
+```
+npm run icons   # → extension 16/48/128 + desktop 512, via scripts/make-icons.js
+```
+
+`scripts/make-icons.js` rasterises the mark itself and encodes the PNGs with Node's
+built-in zlib (zero dependencies, byte-reproducible). `scripts/make-icons.html` renders
+the same design in a browser and is kept purely as a visual playground.
 
 ### Packaging the desktop app
 
