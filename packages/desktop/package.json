@@ -10,7 +10,7 @@
     "dist": "electron-builder --win nsis"
   },
   "devDependencies": {
-    "electron": "^43.1.1",
+    "electron": "43.1.1",
     "electron-builder": "^26.0.0"
   },
   "build": {
