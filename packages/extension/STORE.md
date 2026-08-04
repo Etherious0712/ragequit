@@ -78,21 +78,34 @@ nothing, if it isn't there yet.)
 
 ---
 
-## Screenshots (you capture these — I can't produce store-grade binaries here)
+## Screenshots
 
-Google requires **1280×800** (or 640×400) PNG/JPEG, 1–5 images. Suggested set:
+Google requires **1280×800** (or 640×400) PNG/JPEG, 1–5 images.
 
-1. Load the extension unpacked in real Chrome (`chrome://extensions` → Developer
-   mode → Load unpacked → `packages/extension`).
-2. Open a bright, busy page (a news site or a colorful demo page reads best).
-3. Click the toolbar button to arm ragequit. Resize the window to ~1280×800.
-4. Capture 3–5 shots, each showing a different weapon mid-carnage:
-   - glass cracks spidering across an article,
-   - a machine-gun spray with casings,
-   - flamethrower char + smoke,
-   - a dynamite crater with edge cracks,
-   - the left toolbar visible so people see the weapon picker.
-5. Use the OS screenshot tool or the extension's own 📷 save button, then crop to
-   exactly 1280×800.
+There's a generator that produces them at exactly 1280×800 — no cropping, no OS
+screenshot tool. Open this file in Chrome:
+
+```
+packages/core/shots.html
+```
+
+It draws a realistic mock news page, runs the real engine on top, and gives you preset
+scene buttons. For each one: click the scene, then click **⬇ download**. The PNG lands in
+your Downloads folder at exactly 1280×800.
+
+| Button | Shows |
+|---|---|
+| 1 mixed | glass, bullet holes, a hammered breach and paint splats together |
+| 2 hardware | one spot dug clean through — LCD, backlight, PCB, chassis |
+| 3 machine gun | a sweeping burst with bullet holes and brass casings |
+| 4 burn | flamethrower char and smoke plus a chainsaw gash |
+| 5 dynamite | crater and edge cracks (wait ~2s for the fuse, *then* download) |
+
+Scenes 1 and 2 are the strongest first two images — 2 is the one that shows off what makes
+this different from every other "crack the screen" toy.
+
+The engine's toolbar is hidden in these composites (they're page + damage + guts only), so
+if you want one shot showing the weapon picker, take that one manually with the extension
+loaded in Chrome.
 
 A 440×280 (small) or 1400×560 (marquee) promo tile is optional but helps the listing.

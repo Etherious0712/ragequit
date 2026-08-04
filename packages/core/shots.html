@@ -1,0 +1,137 @@
+<!doctype html>
+<!-- Dev-only: builds Chrome Web Store screenshots at exactly 1280x800.
+     The "webpage" behind the destruction is drawn on a canvas so the whole scene
+     (page + guts + damage) can be composited and downloaded as one PNG.
+     Open, then call shot(n) from the console, or use the buttons. -->
+<meta charset="utf-8">
+<meta http-equiv="cache-control" content="no-store">
+<title>ragequit store shots</title>
+<style>
+  html, body { margin: 0; background: #202024; overflow: hidden; }
+  #page { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+  #ui { position: fixed; right: 8px; bottom: 8px; z-index: 2147483646;
+        font: 12px system-ui; color: #eee; background: rgba(0,0,0,.6);
+        padding: 6px 8px; border-radius: 6px; }
+  #ui button { font: 12px system-ui; margin-left: 4px; }
+</style>
+<body>
+<canvas id="page"></canvas>
+<div id="ui">
+  <button onclick="scene(1)">1 mixed</button>
+  <button onclick="scene(2)">2 hardware</button>
+  <button onclick="scene(3)">3 machine gun</button>
+  <button onclick="scene(4)">4 burn</button>
+  <button onclick="scene(5)">5 dynamite</button>
+  <button onclick="shot()">⬇ download</button>
+  <button onclick="__SMASH__.reset()">reset</button>
+</div>
+<script>
+  // ---- fake but realistic-looking article page, drawn to canvas ----
+  const pg = document.getElementById('page');
+  const W = 1280, H = 800;
+  function drawPage() {
+    pg.width = W; pg.height = H;
+    const g = pg.getContext('2d');
+    g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+    // header bar
+    g.fillStyle = '#1f6feb'; g.fillRect(0, 0, W, 64);
+    g.fillStyle = '#fff'; g.font = 'bold 24px system-ui';
+    g.fillText('The Daily Deadline', 32, 41);
+    g.font = '15px system-ui';
+    ['Home', 'World', 'Tech', 'Opinion', 'Sport'].forEach((t, i) => g.fillText(t, 620 + i * 92, 40));
+    // hero image block
+    g.fillStyle = '#dbe6f3'; g.fillRect(32, 96, 760, 300);
+    g.fillStyle = '#b8cbe0';
+    for (let i = 0; i < 5; i++) g.fillRect(60 + i * 150, 300 - i * 22, 110, 70 + i * 22);
+    g.fillStyle = '#9fb6cf'; g.beginPath(); g.arc(180, 180, 44, 0, Math.PI * 2); g.fill();
+    // headline + body text
+    g.fillStyle = '#111'; g.font = 'bold 34px Georgia, serif';
+    g.fillText('Everything Is Fine, Say People', 32, 452);
+    g.fillText('Whose Job It Is To Say That', 32, 492);
+    g.fillStyle = '#444'; g.font = '15px Georgia, serif';
+    const line = 'Officials confirmed today that the situation remains entirely under control and';
+    for (let i = 0; i < 12; i++) g.fillText(i % 3 === 2 ? line.slice(0, 58) + '.' : line, 32, 534 + i * 22);
+    // sidebar
+    g.fillStyle = '#f4f6f8'; g.fillRect(824, 96, 424, 660);
+    g.fillStyle = '#111'; g.font = 'bold 17px system-ui';
+    g.fillText('Most Read', 848, 130);
+    g.fillStyle = '#333'; g.font = '14px system-ui';
+    ['Man discovers new way to be tired', 'Nation quietly agrees to stop pretending',
+     'Local screen "had it coming", sources say', 'Five signs you need a break',
+     'The office printer has notes'].forEach((t, i) => {
+      g.fillStyle = '#e7ebf0'; g.fillRect(848, 150 + i * 96, 376, 78);
+      g.fillStyle = '#c8d4e0'; g.fillRect(856, 158 + i * 96, 62, 62);
+      g.fillStyle = '#222'; g.fillText(t.slice(0, 34), 930, 186 + i * 96);
+      g.fillStyle = '#7a8794'; g.fillText('3 min read', 930, 208 + i * 96);
+    });
+  }
+  drawPage();
+  addEventListener('resize', drawPage);
+
+  // the engine treats this like any page; give it a host so 📷 works too
+  window.__SMASH_HOST__ = { capture: () => Promise.resolve(pg.toDataURL('image/png')) };
+
+  // ---- preset scenes, so each store screenshot is one click ----
+  const arm = (k) => dispatchEvent(new KeyboardEvent('keydown', { key: k }));
+  const dmgCanvas = () => [...document.querySelectorAll('canvas')]
+    .filter((c) => c !== pg && c.style.position === 'fixed')[1];
+  const hit = (x, y) => dmgCanvas().dispatchEvent(
+    new MouseEvent('mousedown', { button: 0, clientX: x, clientY: y, bubbles: true }));
+  const drag = (pts) => {
+    const c = dmgCanvas();
+    c.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: pts[0][0], clientY: pts[0][1], bubbles: true }));
+    pts.slice(1).forEach((p) => c.dispatchEvent(new MouseEvent('mousemove', { clientX: p[0], clientY: p[1], bubbles: true })));
+    dispatchEvent(new MouseEvent('mouseup'));
+  };
+
+  window.scene = function (n) {
+    __SMASH__.reset();
+    if (n === 1) { // a bit of everything
+      arm('2'); [[300, 470], [420, 500], [210, 540]].forEach((p) => hit(p[0], p[1]));
+      arm('3'); [[300, 200], [430, 260], [520, 170], [380, 320]].forEach((p) => hit(p[0], p[1]));
+      arm('1'); for (let i = 0; i < 9; i++) hit(660, 210);
+      arm('7'); [[980, 300], [1100, 520]].forEach((p) => hit(p[0], p[1]));
+    } else if (n === 2) { // hero shot: dug clean through to the hardware
+      arm('1'); for (let i = 0; i < 14; i++) hit(430, 250);
+      arm('2'); [[330, 380], [560, 190]].forEach((p) => hit(p[0], p[1]));
+      arm('3'); [[250, 300], [600, 330]].forEach((p) => hit(p[0], p[1]));
+    } else if (n === 3) { // machine gun spray + casings
+      arm('4');
+      for (let i = 0; i < 40; i++) hit(240 + i * 14 + Math.sin(i) * 30, 240 + Math.cos(i * 0.7) * 90);
+    } else if (n === 4) { // flamethrower char + chainsaw gash
+      arm('5');
+      for (let i = 0; i < 60; i++) hit(320 + i * 6, 300 + Math.sin(i * 0.25) * 60);
+      arm('6'); drag([[860, 620], [960, 600], [1060, 640], [1160, 610]]);
+    } else if (n === 5) { // dynamite crater (wait ~2s for the fuse, then download)
+      arm('0'); hit(560, 360);
+    }
+    return n === 5 ? 'fuse lit — wait ~2s, then download' : 'scene ' + n + ' ready';
+  };
+
+  // ---- composite page + guts + damage into one 1280x800 PNG and download ----
+  window.shot = function (name) {
+    const overlays = [...document.querySelectorAll('canvas')].filter(c => c !== pg && c.style.position === 'fixed');
+    const out = document.createElement('canvas');
+    out.width = W; out.height = H;
+    const o = out.getContext('2d');
+    o.drawImage(pg, 0, 0, W, H);
+    // guts (index 0) then damage (index 1); skip the fx layer's transient bits
+    for (const c of overlays.slice(0, 2)) o.drawImage(c, 0, 0, W, H);
+    out.toBlob(b => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = (name || 'ragequit-shot') + '.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }, 'image/png');
+    return 'downloading ' + W + 'x' + H;
+  };
+</script>
+<script>
+  for (const s of ['guts.js', 'tools/10-hammer.js', 'tools/20-cracks.js', 'tools/30-gun.js',
+                   'tools/40-machinegun.js', 'tools/50-flamethrower.js', 'tools/60-chainsaw.js',
+                   'tools/70-paintball.js', 'tools/80-laser.js', 'tools/90-termites.js',
+                   'tools/a0-dynamite.js', 'destroy.js'])
+    document.write('<script src="' + s + '?t=' + Date.now() + '"><\/script>');
+</script>
+</body>
