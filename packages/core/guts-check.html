@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Dev-only visual check for the hardware strata (not shipped; excluded from the
+     extension zip, which filters *.html to code+icons). Open to eyeball each layer. -->
+<meta charset="utf-8">
+<meta http-equiv="cache-control" content="no-store">
+<title>guts strata check</title>
+<body style="margin:0;background:#222;color:#eee;font:13px sans-serif" data-v="3">
+<div id="out"></div>
+<script>
+  document.write('<script src="guts.js?t=' + Date.now() + '"><\/script>');
+</script>
+<script>
+  const G = window.__SMASH_GUTS__;
+  const labels = ['1.5 — LCD panel', '2.5 — backlight', '3.5 — circuit board', '4.5 — chassis void'];
+  [1.5, 2.5, 3.5, 4.5].forEach((d, i) => {
+    const cv = document.createElement('canvas');
+    cv.width = 230; cv.height = 230;
+    const g = cv.getContext('2d');
+    // fake page content behind, so we judge how the guts read over real content
+    g.fillStyle = '#e8f0fa'; g.fillRect(0, 0, 230, 230);
+    g.fillStyle = '#3a4a5a'; g.font = '13px sans-serif';
+    for (let l = 0; l < 15; l++) g.fillText('some page content here', 8, 16 + l * 15);
+    G.reset();
+    G.paint(g, 115, 115, 82, d, () => d);
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:inline-block;margin:10px;text-align:center';
+    wrap.appendChild(cv);
+    const cap = document.createElement('div');
+    cap.textContent = labels[i];
+    cap.style.marginTop = '4px';
+    wrap.appendChild(cap);
+    document.getElementById('out').appendChild(wrap);
+  });
+  G.reset();
+</script>
+</body>

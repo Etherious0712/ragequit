@@ -15,6 +15,13 @@
   // ---- overlay canvas (fixed to the viewport — damage sticks to the "glass") ----
   // plus an fx canvas above it: cleared every frame, for transient animation
   // (casings, particles) driven by tools' optional frame(fxCtx, dt, w, h).
+  // The guts canvas sits UNDER the damage layer: hardware (LCD, backlight, PCB,
+  // chassis) is painted into it only where a weapon breaches, so holes in the
+  // damage art reveal the innards instead of a flat black core.
+  // Stack, bottom → top: page/screenshot → guts → damage → fx.
+  const guts = doc.createElement('canvas');
+  guts.style.cssText = 'position:fixed;inset:0;z-index:' + Z + ';pointer-events:none;';
+  const gutsCtx = guts.getContext('2d');
   const canvas = doc.createElement('canvas');
   canvas.style.cssText = 'position:fixed;inset:0;z-index:' + Z + ';';
   const ctx = canvas.getContext('2d');
@@ -22,17 +29,74 @@
   fx.style.cssText = 'position:fixed;inset:0;z-index:' + Z + ';pointer-events:none;';
   const fxCtx = fx.getContext('2d');
 
+  // Viewport can read 0 if we're injected into a hidden/throttled/oddly-embedded
+  // page; fall back so the canvases are never born 0x0 (they'd stay blank forever).
+  const vw = () => innerWidth || doc.documentElement.clientWidth || 1280;
+  const vh = () => innerHeight || doc.documentElement.clientHeight || 800;
+
   function sizeCanvas(c, c2d) {
     const dpr = window.devicePixelRatio || 1;
-    c.width = innerWidth * dpr;
-    c.height = innerHeight * dpr;
-    c.style.width = innerWidth + 'px';
-    c.style.height = innerHeight + 'px';
+    const w = vw(), h = vh();
+    c.width = w * dpr;
+    c.height = h * dpr;
+    c.style.width = w + 'px';
+    c.style.height = h + 'px';
     c2d.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
   }
+
+  // ---- depth grid: how deep each cell has been chewed (0 = pristine glass) ----
+  // 16px cells: small enough that narrow weapons (bullets, laser) still register
+  // on the cell they actually hit. ~8k floats at 1080p — nothing.
+  const CELL = 16;
+  let depth = null, gw = 0, gh = 0;
+  function sizeDepth() {
+    gw = Math.ceil(vw() / CELL) + 1;
+    gh = Math.ceil(vh() / CELL) + 1;
+    depth = new Float32Array(gw * gh);
+  }
+  function depthAt(x, y) {
+    const i = (Math.floor(y / CELL) * gw + Math.floor(x / CELL));
+    return depth && i >= 0 && i < depth.length ? depth[i] : 0;
+  }
+  // Raise depth over a disc, returning the deepest value reached.
+  function addDepth(x, y, radius, amount) {
+    if (!depth) return 0;
+    let deepest = 0;
+    // The cell you actually hit always takes the full bite, even if its centre
+    // falls outside a narrow breach radius — otherwise pinpoint weapons could
+    // pound one spot forever without ever digging.
+    const hi = Math.floor(y / CELL) * gw + Math.floor(x / CELL);
+    if (hi >= 0 && hi < depth.length) {
+      depth[hi] = Math.min(5, depth[hi] + amount);
+      deepest = depth[hi];
+    }
+    const c0 = Math.max(0, Math.floor((x - radius) / CELL));
+    const c1 = Math.min(gw - 1, Math.floor((x + radius) / CELL));
+    const r0 = Math.max(0, Math.floor((y - radius) / CELL));
+    const r1 = Math.min(gh - 1, Math.floor((y + radius) / CELL));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const i = r * gw + c;
+        if (i === hi) continue; // already took the full bite above
+        const dx = (c + 0.5) * CELL - x, dy = (r + 0.5) * CELL - y;
+        const d = Math.hypot(dx, dy);
+        if (d > radius) continue;
+        // full bite at the centre, tapering to nothing at the rim
+        depth[i] = Math.min(5, depth[i] + amount * (1 - d / radius));
+        if (depth[i] > deepest) deepest = depth[i];
+      }
+    }
+    return deepest;
+  }
+
   function resize() {
-    sizeCanvas(canvas, ctx); // damage wipes on resize (fine for a toy)
+    sizeCanvas(guts, gutsCtx); // damage wipes on resize (fine for a toy)
+    sizeCanvas(canvas, ctx);
     sizeCanvas(fx, fxCtx);
+    sizeDepth();
+    // the strata art is gone with the pixels — drop the remembered breaches too,
+    // or flicker/glitch would keep firing at coordinates that no longer have holes
+    if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
   }
   resize();
 
@@ -42,11 +106,14 @@
   function fxTick(t) {
     const dt = Math.min((t - fxLast) / 1000, 0.05);
     fxLast = t;
-    fxCtx.clearRect(0, 0, innerWidth, innerHeight);
+    fxCtx.clearRect(0, 0, vw(), vh());
     let live = false;
-    for (const tl of tools) if (tl.frame && tl.frame(fxCtx, dt, innerWidth, innerHeight)) live = true;
+    for (const tl of tools) if (tl.frame && tl.frame(fxCtx, dt, vw(), vh())) live = true;
+    // guts animation (sparks, falling shards, dangling cables, flicker) shares the loop
+    const g = window.__SMASH_GUTS__;
+    if (g && g.frame(fxCtx, gutsCtx, dt, vw(), vh())) live = true;
     if (live && fxRunning) requestAnimationFrame(fxTick);
-    else { fxRunning = false; fxCtx.clearRect(0, 0, innerWidth, innerHeight); }
+    else { fxRunning = false; fxCtx.clearRect(0, 0, vw(), vh()); }
   }
   function startFx() {
     if (fxRunning) return;
@@ -62,7 +129,7 @@
   function shakeStep() {
     const now = performance.now();
     if (now >= shakeEnd) {
-      canvas.style.transform = fx.style.transform = '';
+      canvas.style.transform = fx.style.transform = guts.style.transform = '';
       shakeRAF = 0;
       return;
     }
@@ -70,7 +137,7 @@
     const m = shakeMag * k * k;
     const t = 'translate(' + ((Math.random() * 2 - 1) * m).toFixed(1) + 'px,' +
               ((Math.random() * 2 - 1) * m).toFixed(1) + 'px)';
-    canvas.style.transform = fx.style.transform = t;
+    canvas.style.transform = fx.style.transform = guts.style.transform = t;
     shakeRAF = requestAnimationFrame(shakeStep);
   }
   function shake(mag, dur) {
@@ -271,7 +338,10 @@
 
   // ---- actions ----
   function reset() {
-    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    ctx.clearRect(0, 0, vw(), vh());
+    gutsCtx.clearRect(0, 0, vw(), vh());
+    if (depth) depth.fill(0); // screen is pristine glass again
+    if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
     tools.forEach((t) => t.reset && t.reset());
   }
 
@@ -290,29 +360,32 @@
       const host = window.__SMASH_HOST__;
       let backdrop = null;
       if (host && host.capture) {
-        const prev = [bar, fx, canvas].map((el) => el.style.display);
-        bar.style.display = fx.style.display = canvas.style.display = 'none';
+        const hide = [bar, fx, canvas, guts];
+        const prev = hide.map((el) => el.style.display);
+        hide.forEach((el) => (el.style.display = 'none'));
         try {
           // setTimeout (not rAF) so the hide still lands even if rendering is throttled
           await new Promise((r) => setTimeout(r, 32));
           backdrop = await host.capture();
         } catch (e) { backdrop = null; }
-        [bar, fx, canvas].forEach((el, i) => (el.style.display = prev[i]));
+        hide.forEach((el, i) => (el.style.display = prev[i]));
       }
 
       const W = canvas.width, H = canvas.height;
       const out = makeCanvas(W, H);
       const octx = out.getContext('2d');
       let noteBackdropMissing = !!(host && host.capture) && !backdrop;
+      // same stacking order as on screen: backdrop → guts → damage
+      const layers = () => { octx.drawImage(guts, 0, 0); octx.drawImage(canvas, 0, 0); };
       if (backdrop) {
         await new Promise((res) => {
           const img = new Image();
-          img.onload = () => { octx.drawImage(img, 0, 0, W, H); octx.drawImage(canvas, 0, 0); res(); };
-          img.onerror = () => { noteBackdropMissing = true; octx.drawImage(canvas, 0, 0); res(); };
+          img.onload = () => { octx.drawImage(img, 0, 0, W, H); layers(); res(); };
+          img.onerror = () => { noteBackdropMissing = true; layers(); res(); };
           img.src = backdrop;
         });
       } else {
-        octx.drawImage(canvas, 0, 0);
+        layers();
       }
       showPreview(out, noteBackdropMissing);
     } finally {
@@ -370,15 +443,18 @@
     stopAuto();
     fxRunning = false;
     if (shakeRAF) cancelAnimationFrame(shakeRAF);
+    guts.remove();
     canvas.remove();
     fx.remove();
     bar.remove();
+    if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
     if (previewDim) { previewDim.remove(); previewDim = null; } // don't leak an open preview
     clearTimeout(swingTimer);
     if (ac) ac.close();
     tools.forEach((t) => t.reset && t.reset());
     delete window.__SMASH__;
     delete window.__SMASH_TOOLS__; // concat re-registers tools on next injection
+    delete window.__SMASH_GUTS__;  // ditto — never leave closures on the host page
     delete window.__SMASH_HOST__;  // extension re-injects host.js; desktop is closing anyway
     // desktop app: quitting the toy quits the app (bridge set by desktop preload)
     const d = window.__SMASH_DESKTOP__;
@@ -389,11 +465,42 @@
   let mx = 0, my = 0;      // tracked cursor for auto-fire follow
   let autoTimer = 0;       // interval id while holding an auto weapon
 
+  // Hardware-breach API handed to weapons as hit()'s 4th arg. Tools that ignore
+  // it keep working unchanged (backward-compatible). Implementation lives in
+  // guts.js, which registers itself as window.__SMASH_GUTS__ before the engine.
+  const G = window.__SMASH_GUTS__;
+  let lastZap = 0;
+  const breachApi = {
+    // Chew `amount` deeper over a disc and repaint the exposed strata there.
+    breach(x, y, radius, amount) {
+      const wasDeep = depthAt(x, y) >= 1;
+      const d = addDepth(x, y, radius, amount);
+      if (G) {
+        G.paint(gutsCtx, x, y, radius, d, depthAt);
+        // once breached, clear the damage art covering the hole so the guts show
+        if (d >= 1) G.punch(ctx, x, y, radius);
+      }
+      if (d >= 1) {
+        startFx(); // sparks/shards/flicker need the fx loop running
+        // zap only on the moment of first breach-through, not every later hit —
+        // and throttled, since a spray can cross the threshold on several
+        // adjacent cells within one burst
+        if (!wasDeep && G && G.zap && performance.now() - lastZap > 90 && ensureAudio()) {
+          lastZap = performance.now();
+          G.zap(ac, masterGain || master);
+        }
+      }
+      return d;
+    },
+    depthAt: depthAt,
+    spark(x, y, n) { if (G) { G.spark(x, y, n); startFx(); } },
+  };
+
   function fireOnce(x, y) {
-    tool.hit(ctx, x, y);
+    tool.hit(ctx, x, y, breachApi);
     if (tool.soundLoop) startLoop(); // looping weapons roar continuously instead of per-hit
     else playSound();
-    if (tool.frame) startFx();
+    if (tool.frame || G) startFx();
   }
 
   function stopAuto() {
@@ -440,6 +547,7 @@
   addEventListener('resize', resize);
   addEventListener('keydown', onKey, true);
 
+  doc.documentElement.appendChild(guts); // under the damage layer — order matters
   doc.documentElement.appendChild(canvas);
   doc.documentElement.appendChild(fx);
   doc.documentElement.appendChild(bar);

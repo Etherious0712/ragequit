@@ -97,7 +97,7 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       // dark rim under the light disc — keeps the impact visible on light pages
       const rim = ctx.createRadialGradient(x, y, 0, x, y, 9);
       rim.addColorStop(0, 'rgba(15,20,30,0.35)');
@@ -140,6 +140,9 @@
       if (impacts.length > 60) impacts.shift(); // ponytail: cap memory; oldest shatters stop extending
 
       flash(x, y);
+      // breach last so this shatter's own art doesn't cover the hole; spidering
+      // glass barely goes past the surface, so it takes many hits to break through
+      if (api) api.breach(x, y, 18, 0.2);
     },
 
     // Sharp clink + tinkle tail of tiny shard pings.

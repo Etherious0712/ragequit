@@ -80,7 +80,7 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       const now = performance.now();
       if (now - lastShot > 300) burstStart = now; // gap = new burst, recoil resets
       lastShot = now;
@@ -151,6 +151,9 @@
         vr: rand(-12, 12),
         life: 3,
       });
+      // breach last (after this round's own art) so the hole isn't repainted over;
+      // floor keeps the exposed area readable at bullet scale
+      if (api) api.breach(x, y, Math.max(R * 1.6, 16), 0.5);
     },
 
     // fx layer: simulate casings (gravity, floor bounce, fade) + flash flicker.

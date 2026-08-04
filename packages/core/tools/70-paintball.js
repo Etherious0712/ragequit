@@ -64,7 +64,9 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    // No api.breach() on purpose: paint splatters, it doesn't pierce. This is the
+    // one weapon that never exposes hardware, which makes the others feel harder.
+    hit(ctx, x, y, api) {
       dmgCtx = ctx;
       const color = randColor();
       const R = rand(14, 22);

@@ -82,13 +82,16 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       const now = performance.now();
       firing = now;
       fx_x = x; fx_y = y;
       // char the path; a time gap means a fresh start, not a long jump-cut
       if (last && now - last.t < 120) char(ctx, last.x, last.y, x, y);
       else char(ctx, x - 1, y, x, y); // dot at the impact on a fresh press
+      // a focused beam cuts clean through, fast; radius kept wide enough that the
+      // strata detail inside the slot is actually legible
+      if (api) api.breach(x, y, 16, 0.42);
       last = { x: x, y: y, t: now };
       // sparks fly off the cut point
       for (let i = 0; i < 2; i++) {

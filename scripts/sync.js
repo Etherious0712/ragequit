@@ -7,9 +7,10 @@ const root = path.join(__dirname, '..');
 const core = path.join(root, 'packages', 'core');
 const toolsDir = path.join(core, 'tools');
 
-// Tools first (they register into the global registry), engine last (it reads
-// the registry and starts). Tools sorted by filename for a stable toolbar order.
-let out = '';
+// Order matters: guts.js (hardware layers) and the tools register themselves into
+// globals first, then the engine last — it reads both registries and starts.
+// Tools sorted by filename for a stable toolbar order.
+let out = fs.readFileSync(path.join(core, 'guts.js'), 'utf8') + '\n';
 if (fs.existsSync(toolsDir)) {
   for (const f of fs.readdirSync(toolsDir).sort()) {
     if (f.endsWith('.js')) out += fs.readFileSync(path.join(toolsDir, f), 'utf8') + '\n';

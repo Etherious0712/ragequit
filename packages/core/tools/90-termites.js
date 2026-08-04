@@ -11,6 +11,7 @@
 
   let bugs = [];     // {x,y,dir,speed,life,legPhase,gnawAcc}
   let dmgCtx = null; // persistent canvas, captured on first click, for baking holes
+  let breachApi = null; // stashed on drop; bugs keep chewing from frame() afterwards
 
   // Draw a tiny termite at b.(x,y) heading b.dir: dark oval body + head + 6
   // flicking legs. Manual trig (no save/rotate/restore, one stroke) — cheap
@@ -102,8 +103,9 @@
       return { idle: u, swung: u };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       dmgCtx = ctx;
+      breachApi = api;
       const n = 8 + (Math.random() * 5 | 0);
       for (let i = 0; i < n && bugs.length < MAX_BUGS; i++) {
         bugs.push({
@@ -143,7 +145,12 @@
 
         // gnaw a bite roughly every 5px travelled
         b.gnawAcc += b.speed * dt;
-        if (b.gnawAcc > 5 && dmgCtx) { b.gnawAcc = 0; gnaw(dmgCtx, b.x, b.y); }
+        if (b.gnawAcc > 5 && dmgCtx) {
+          b.gnawAcc = 0;
+          gnaw(dmgCtx, b.x, b.y);
+          // slow but relentless: a swarm left alone eats right through the panel
+          if (breachApi) breachApi.breach(b.x, b.y, 14, 0.12);
+        }
 
         // fade the body over the last second of life
         g.globalAlpha = Math.min(1, b.life);

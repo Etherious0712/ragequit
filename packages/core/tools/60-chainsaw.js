@@ -139,7 +139,7 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       const now = performance.now();
       // time gap = a new stroke, not a segment from the old one
       if (!last || now - last.t > 120) {
@@ -151,6 +151,8 @@
       const dist = Math.hypot(x - last.x, y - last.y);
       const speed = dist / dt; // px/s
       speedSmooth += (speed - speedSmooth) * 0.3;
+
+      const stationary = dist < 2;
 
       if (dist < 2) {
         // stationary: grind a widening ragged hole
@@ -177,6 +179,9 @@
         spawnChips(x, y, dist > 8 ? 3 : 2, w);
       }
       last = { x: x, y: y, t: now };
+      // breach last so the fresh gash art doesn't cover the cut-through; a saw
+      // bites deep along whatever it touches, and grinding one spot digs fastest
+      if (api) api.breach(x, y, stationary ? 14 + grind * 8 : 12, stationary ? 0.28 : 0.16);
     },
 
     frame(g, dt, w, h) {

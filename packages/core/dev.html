@@ -5,11 +5,13 @@
 <title>ragequit dev harness</title>
 <body style="font-family:sans-serif;background:linear-gradient(135deg,#e0f2ff,#ffe8d6);height:200vh;margin:24px">
 <h1>Pretend this is your annoying screen</h1>
+
 <p>Click to smash. R = reset, Esc = quit. 📷 saves. Scroll: damage must stay fixed to the viewport.</p>
 <button style="font-size:24px">A very smashable button</button>
+<p>Keep hitting one spot to dig through to the hardware inside.</p>
 <script>
   // cache-busted loads so engine edits always show on reload (same order as scripts/sync.js)
-  for (const s of ['tools/10-hammer.js', 'tools/20-cracks.js', 'tools/30-gun.js', 'tools/40-machinegun.js', 'tools/50-flamethrower.js', 'tools/60-chainsaw.js', 'tools/70-paintball.js', 'tools/80-laser.js', 'tools/90-termites.js', 'tools/a0-dynamite.js', 'destroy.js'])
+  for (const s of ['guts.js', 'tools/10-hammer.js', 'tools/20-cracks.js', 'tools/30-gun.js', 'tools/40-machinegun.js', 'tools/50-flamethrower.js', 'tools/60-chainsaw.js', 'tools/70-paintball.js', 'tools/80-laser.js', 'tools/90-termites.js', 'tools/a0-dynamite.js', 'destroy.js'])
     document.write('<script src="' + s + '?t=' + Date.now() + '"><\/script>');
 </script>
 </body>

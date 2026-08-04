@@ -71,7 +71,7 @@
 
     // Each 50ms tick: one translucent char stamp (≈20 stamps → full black in ~1s)
     // + a burst of flame particles + remember the spot for smoke.
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       const cx = x + rand(-8, 8);
       const cy = y + rand(-6, 6);
       const R = rand(16, 26);
@@ -100,6 +100,9 @@
       // one hotspot per tick is plenty for smoke density
       hotspots.push({ x: cx, y: cy, age: 0 });
       if (hotspots.length > 90) hotspots.shift();
+      // breach last so the fresh char doesn't cover the melt-through; heat works
+      // slowly and widely — char first, then the panel gives way
+      if (api) api.breach(cx, cy, R * 0.8, 0.09);
     },
 
     frame(g, dt, w, h) {

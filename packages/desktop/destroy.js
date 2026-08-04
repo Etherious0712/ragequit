@@ -1,3 +1,424 @@
+// ragequit hardware guts — what's *under* the screen.
+//
+// The engine keeps a depth grid (0 = pristine glass, 5 = punched clean through)
+// and a dedicated canvas beneath the damage layer. Weapons call
+// api.breach(x, y, radius, amount); this module paints the strata that the
+// breach has exposed, so holes reveal LCD → backlight → PCB → chassis instead of
+// a flat black core. Registers as window.__SMASH_GUTS__ before the engine runs.
+(function () {
+  'use strict';
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const pick = (arr) => arr[Math.random() * arr.length | 0];
+
+  // ---- transient state (fx layer) ----
+  let sparks = [];   // {x,y,vx,vy,life,max}
+  let shards = [];   // {x,y,vx,vy,rot,vr,size,life,max,tone}
+  let cables = [];   // {x,y,len,ang,vel,w,hue} dangling ribbon cables
+  let breaches = []; // {x,y,r,depth,born} remembered for flicker/bleed/glitch
+  let glitchUntil = 0;
+
+  // Torn edge — never a clean circle and never a readable polygon. Lots of
+  // vertices with per-vertex jitter plus occasional deep "bites" (snapped-off
+  // chunks), so the boundary reads as ripped material at any radius.
+  function blobPath(g, x, y, r, wobble) {
+    g.beginPath();
+    const n = 34 + (Math.random() * 14 | 0);
+    const seed = rand(0, Math.PI * 2);
+    // Smooth lobing carries the silhouette; per-vertex noise stays small so the
+    // outline reads as a ragged hole rather than a sawtooth starburst.
+    let drift = 0;
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      drift = drift * 0.7 + rand(-wobble, wobble) * 0.3; // correlated, not white noise
+      let k = 1 + Math.sin(a * 3 + seed) * wobble * 0.5
+                + Math.sin(a * 6.7 - seed * 2) * wobble * 0.22
+                + drift;
+      if (Math.random() < 0.035) k -= rand(wobble * 0.4, wobble * 0.9); // small snapped chip
+      const rr = Math.max(r * 0.55, r * k);
+      const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+      i ? g.lineTo(px, py) : g.moveTo(px, py);
+    }
+    g.closePath();
+  }
+
+  // ---- strata (each draws INSIDE an already-clipped blob) ----
+
+  // 1) LCD panel: pixel grid + polarizer sheen + bled liquid-crystal colour.
+  function drawLcd(g, x, y, r) {
+    g.fillStyle = '#0d1014';
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    // subpixel grid
+    const step = 3;
+    for (let py = y - r; py < y + r; py += step) {
+      for (let px = x - r; px < x + r; px += step) {
+        g.fillStyle = pick(['rgba(255,60,60,0.5)', 'rgba(60,255,90,0.5)', 'rgba(70,110,255,0.5)']);
+        g.fillRect(px, py, 1.2, step - 0.8);
+      }
+    }
+    // polarizer rainbow sheen — the giveaway that this is a panel, not paint
+    const sheen = g.createLinearGradient(x - r, y - r, x + r, y + r);
+    sheen.addColorStop(0, 'rgba(120,200,255,0.30)');
+    sheen.addColorStop(0.4, 'rgba(190,120,255,0.20)');
+    sheen.addColorStop(0.7, 'rgba(120,255,200,0.20)');
+    sheen.addColorStop(1, 'rgba(255,180,120,0.28)');
+    g.fillStyle = sheen;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    // bled crystal: dark inky smears creeping from the break. Kept small and
+    // semi-transparent — bigger blobs swamp the subpixel grid, which is the only
+    // cue that this is a screen panel and not just a dark surface.
+    for (let i = 0; i < 3; i++) {
+      const a = rand(0, Math.PI * 2), d = rand(0, r * 0.7);
+      const bx = x + Math.cos(a) * d, by = y + Math.sin(a) * d;
+      const bl = g.createRadialGradient(bx, by, 0, bx, by, rand(r * 0.15, r * 0.35));
+      bl.addColorStop(0, 'rgba(8,6,20,0.55)');
+      bl.addColorStop(1, 'rgba(8,6,20,0)');
+      g.fillStyle = bl;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+  }
+
+  // 2) Backlight / diffuser: the bright white sheet that makes it read as "broken screen".
+  function drawBacklight(g, x, y, r) {
+    // Flat sheet, not a glowing ball: near-uniform fill with a slight directional
+    // gradient. A radial falloff here reads as a 3D bubble, which is wrong.
+    const bg = g.createLinearGradient(x - r, y - r, x + r, y + r);
+    bg.addColorStop(0, 'rgba(252,253,255,0.97)');
+    bg.addColorStop(0.5, 'rgba(240,247,255,0.95)');
+    bg.addColorStop(1, 'rgba(226,238,252,0.93)');
+    g.fillStyle = bg;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    // diffuser dot pattern + a couple of light-guide streaks
+    g.fillStyle = 'rgba(255,255,255,0.5)';
+    for (let i = 0; i < 40; i++) {
+      g.beginPath();
+      g.arc(x + rand(-r, r), y + rand(-r, r), rand(0.6, 1.6), 0, Math.PI * 2);
+      g.fill();
+    }
+    g.strokeStyle = 'rgba(255,255,255,0.35)';
+    g.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const yy = y + rand(-r, r);
+      g.beginPath(); g.moveTo(x - r, yy); g.lineTo(x + r, yy); g.stroke();
+    }
+  }
+
+  // 3) Circuit board: PCB, copper traces, chips, solder, ribbon connector.
+  function drawPcb(g, x, y, r) {
+    g.fillStyle = pick(['#12492f', '#123f52', '#1d3a1c']);
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    // copper traces: right-angle runs, the signature PCB look
+    g.strokeStyle = 'rgba(215,170,80,0.75)';
+    g.lineWidth = 1.4;
+    for (let i = 0; i < 14; i++) {
+      let px = x + rand(-r, r), py = y + rand(-r, r);
+      g.beginPath();
+      g.moveTo(px, py);
+      for (let s = 0; s < 3; s++) {
+        if (Math.random() < 0.5) px += rand(-r * 0.5, r * 0.5);
+        else py += rand(-r * 0.5, r * 0.5);
+        g.lineTo(px, py);
+      }
+      g.stroke();
+    }
+    // solder pads
+    for (let i = 0; i < 18; i++) {
+      const px = x + rand(-r, r), py = y + rand(-r, r);
+      g.fillStyle = 'rgba(200,205,215,0.85)';
+      g.beginPath(); g.arc(px, py, rand(1, 2.2), 0, Math.PI * 2); g.fill();
+    }
+    // chips
+    for (let i = 0; i < 2 + (Math.random() * 2 | 0); i++) {
+      const cw = rand(r * 0.25, r * 0.5), ch = rand(r * 0.18, r * 0.35);
+      const px = x + rand(-r * 0.7, r * 0.7 - cw), py = y + rand(-r * 0.7, r * 0.7 - ch);
+      g.fillStyle = '#15161a';
+      g.fillRect(px, py, cw, ch);
+      g.strokeStyle = 'rgba(255,255,255,0.18)';
+      g.lineWidth = 0.7;
+      g.strokeRect(px, py, cw, ch);
+      g.fillStyle = 'rgba(190,195,205,0.8)'; // leg pins
+      for (let l = px + 2; l < px + cw - 1; l += 3) {
+        g.fillRect(l, py - 1.5, 1.4, 1.5);
+        g.fillRect(l, py + ch, 1.4, 1.5);
+      }
+    }
+  }
+
+  // 4) Chassis void: you've punched clean through — dark metal, wires, a screw.
+  function drawChassis(g, x, y, r) {
+    g.fillStyle = '#07080a';
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    const lip = g.createRadialGradient(x, y, r * 0.35, x, y, r);
+    lip.addColorStop(0, 'rgba(0,0,0,0.95)');
+    lip.addColorStop(1, 'rgba(70,75,85,0.55)'); // metal lip catching light
+    g.fillStyle = lip;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    // loose wires
+    for (let i = 0; i < 3; i++) {
+      g.strokeStyle = pick(['#c0392b', '#e0a92b', '#2b6fc0', '#eeeeee', '#333']);
+      g.lineWidth = rand(1.2, 2.4);
+      g.beginPath();
+      const sx = x + rand(-r, r), sy = y - r;
+      g.moveTo(sx, sy);
+      g.bezierCurveTo(sx + rand(-r, r), y, x + rand(-r, r), y + rand(0, r), x + rand(-r, r), y + r);
+      g.stroke();
+    }
+    // a screw boss
+    if (Math.random() < 0.5) {
+      const px = x + rand(-r * 0.6, r * 0.6), py = y + rand(-r * 0.6, r * 0.6);
+      g.fillStyle = 'rgba(120,126,138,0.9)';
+      g.beginPath(); g.arc(px, py, rand(2.5, 4), 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(20,22,26,0.9)';
+      g.lineWidth = 1;
+      g.beginPath(); g.moveTo(px - 2.5, py); g.lineTo(px + 2.5, py); g.stroke();
+    }
+  }
+
+  const STRATA = [drawLcd, drawBacklight, drawPcb, drawChassis];
+
+  // A dangling ribbon cable, drawn wherever it currently hangs. Used both for the
+  // live swing (fx canvas) and for the one-time bake once it comes to rest.
+  function drawCable(g, c) {
+    const ex = c.x + Math.sin(c.ang) * c.len, ey = c.y + Math.cos(c.ang) * c.len;
+    const mx = c.x + Math.sin(c.ang) * c.len * 0.5, my = c.y + c.len * 0.45;
+    const grad = g.createLinearGradient(c.x, c.y, ex, ey);
+    grad.addColorStop(0, 'hsl(' + c.hue + ',65%,45%)');
+    grad.addColorStop(1, 'hsl(' + c.hue + ',60%,32%)');
+    g.strokeStyle = grad;
+    g.lineWidth = c.w;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(c.x, c.y);
+    g.quadraticCurveTo(mx, my, ex, ey);
+    g.stroke();
+    // conductor stripes down the ribbon
+    g.strokeStyle = 'rgba(190,160,90,0.5)';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(c.x, c.y);
+    g.quadraticCurveTo(mx, my, ex, ey);
+    g.stroke();
+  }
+
+  window.__SMASH_GUTS__ = {
+    // Paint the strata exposed by a breach. `d` is the deepest value reached;
+    // each layer is drawn in a progressively smaller blob so the cross-section
+    // reads as strata — shallow ring outside, deepest core in the middle.
+    paint(g, x, y, radius, d, depthAt) {
+      if (d < 1) return; // still just cracked glass — the damage layer covers it
+      const layers = Math.min(4, Math.floor(d));
+      let cx = x, cy = y;
+      for (let i = 0; i < layers; i++) {
+        // layer i occupies a shrinking share of the breach radius, and each
+        // deeper layer drifts slightly off-centre so the strata aren't
+        // perfectly nested rings (that reads as stacked stickers, not damage)
+        const r = radius * (1 - i * 0.17);
+        if (r < 3) break;
+        if (i) { cx += rand(-radius * 0.07, radius * 0.07); cy += rand(-radius * 0.07, radius * 0.07); }
+        g.save();
+        blobPath(g, cx, cy, r, 0.26);
+        g.clip();
+        STRATA[i](g, cx, cy, r);
+        // inner shadow around the rim: sells "looking down into a hole" rather
+        // than a flat sticker pasted on the screen
+        const sh = g.createRadialGradient(cx, cy, r * 0.55, cx, cy, r);
+        sh.addColorStop(0, 'rgba(0,0,0,0)');
+        sh.addColorStop(1, 'rgba(0,0,0,0.6)');
+        g.fillStyle = sh;
+        g.fillRect(cx - r, cy - r, r * 2, r * 2);
+        g.restore();
+      }
+      breaches.push({ x: x, y: y, r: radius, depth: d, born: performance.now() });
+      if (breaches.length > 140) breaches.shift(); // ponytail: cap; oldest stop flickering
+
+      // debris + sparks scale with how deep this hit went
+      this.spark(x, y, 3 + layers * 3);
+      for (let i = 0; i < 2 + layers; i++) {
+        shards.push({
+          x: x, y: y,
+          vx: rand(-120, 120), vy: rand(-260, -60),
+          rot: rand(0, Math.PI * 2), vr: rand(-14, 14),
+          size: rand(3, 8), life: rand(1.2, 2.4), max: 0,
+          tone: Math.random() < 0.5 ? 210 : 190,
+        });
+      }
+      // deep tears let a ribbon cable flop out
+      // a thin ribbon cable occasionally flops out of a deep tear (rare and
+      // slender on purpose — a fat one reads as a plank, not a cable)
+      if (d >= 3.5 && cables.length < 6 && Math.random() < 0.16) {
+        cables.push({
+          x: x + rand(-radius * 0.4, radius * 0.4), y: y,
+          len: rand(16, 40), ang: rand(-0.4, 0.4), vel: 0,
+          settle: rand(1.5, 3), done: false, // min swing time before it can bake out
+          w: rand(2.5, 4.5), hue: pick([38, 45, 30]),
+        });
+      }
+      if (d >= 2 && Math.random() < 0.35) glitchUntil = performance.now() + rand(120, 400);
+    },
+
+    // Punch the hole open in the DAMAGE layer: erase the accumulated cracks and
+    // char inside the breach so the hardware underneath is actually visible
+    // (without this, repeated hits bury the guts under their own dark art), then
+    // ring it with a torn rim so it never looks like a clean cookie-cutter cut.
+    punch(dctx, x, y, r) {
+      dctx.save();
+      dctx.globalCompositeOperation = 'destination-out';
+      blobPath(dctx, x, y, r * 0.92, 0.22);
+      dctx.fill();
+      dctx.restore();
+      // torn rim: dark broken edge + a few bright chipped glints
+      dctx.save();
+      dctx.lineJoin = 'round';
+      blobPath(dctx, x, y, r * 0.94, 0.22);
+      dctx.strokeStyle = 'rgba(12,14,20,0.85)';
+      dctx.lineWidth = rand(1.5, 3);
+      dctx.stroke();
+      dctx.strokeStyle = 'rgba(225,235,250,0.35)';
+      dctx.lineWidth = 1;
+      dctx.stroke();
+      dctx.restore();
+    },
+
+    spark(x, y, n) {
+      for (let i = 0; i < n; i++) {
+        sparks.push({
+          x: x, y: y,
+          vx: rand(-260, 260), vy: rand(-300, 60),
+          life: rand(0.18, 0.5), max: 0,
+        });
+      }
+    },
+
+    // Electrical zap for a fresh breach — short, bright, band-passed noise + a
+    // falling whine. Weapons call this via the engine when they punch through.
+    zap(ac, dest) {
+      const t = ac.currentTime;
+      const out = ac.createGain();
+      out.gain.value = 0.28;
+      out.connect(dest || ac.destination);
+      const len = ac.sampleRate * 0.12 | 0;
+      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3) * Math.min(1, i / 8);
+      }
+      const src = ac.createBufferSource();
+      src.buffer = buf;
+      const bp = ac.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(rand(2600, 4200), t);
+      bp.frequency.exponentialRampToValueAtTime(700, t + 0.12);
+      bp.Q.value = 3;
+      src.connect(bp).connect(out);
+      src.start(t);
+    },
+
+    // Animated bits, driven by the engine's fx loop. `fg` = transient fx canvas,
+    // `gg` = the persistent guts canvas (used for flicker overlays).
+    frame(fg, gg, dt, w, h) {
+      const now = performance.now();
+
+      // sparks: additive, gravity, quick fade
+      fg.save();
+      fg.globalCompositeOperation = 'lighter';
+      for (const s of sparks) {
+        if (!s.max) s.max = s.life;
+        s.life -= dt;
+        if (s.life <= 0) continue;
+        s.vy += 700 * dt;
+        s.x += s.vx * dt; s.y += s.vy * dt;
+        const k = s.life / s.max;
+        fg.fillStyle = 'rgba(255,' + (200 + 55 * k | 0) + ',150,' + k.toFixed(2) + ')';
+        fg.beginPath();
+        fg.arc(s.x, s.y, 1.4 * k + 0.5, 0, Math.PI * 2);
+        fg.fill();
+      }
+      fg.restore();
+      sparks = sparks.filter((s) => s.life > 0);
+
+      // falling shards of screen/plastic
+      for (const s of shards) {
+        if (!s.max) s.max = s.life;
+        s.life -= dt;
+        if (s.life <= 0) continue;
+        s.vy += 900 * dt;
+        s.x += s.vx * dt; s.y += s.vy * dt;
+        s.rot += s.vr * dt;
+        if (s.y > h - 4) { s.y = h - 4; s.vy *= -0.25; s.vx *= 0.6; s.vr *= 0.5; }
+        const a = Math.min(1, s.life);
+        fg.save();
+        fg.translate(s.x, s.y);
+        fg.rotate(s.rot);
+        fg.fillStyle = 'rgba(' + s.tone + ',' + (s.tone + 15) + ',' + (s.tone + 30) + ',' + (a * 0.75).toFixed(2) + ')';
+        fg.beginPath();
+        fg.moveTo(-s.size / 2, -s.size / 3);
+        fg.lineTo(s.size / 2, -s.size / 2);
+        fg.lineTo(s.size / 3, s.size / 2);
+        fg.closePath();
+        fg.fill();
+        fg.strokeStyle = 'rgba(255,255,255,' + (a * 0.5).toFixed(2) + ')';
+        fg.lineWidth = 0.6;
+        fg.stroke();
+        fg.restore();
+      }
+      shards = shards.filter((s) => s.life > 0 && s.x > -30 && s.x < w + 30);
+
+      // dangling ribbon cables — lazy pendulum from the tear they fell out of.
+      // Once one stops swinging it is baked into the persistent guts canvas and
+      // dropped from the live list, so a hanging cable can't keep the rAF loop
+      // running forever (it stays visible; it just stops costing frames).
+      for (const c of cables) {
+        c.vel += -Math.sin(c.ang) * 6 * dt;   // gravity restoring toward straight down
+        c.vel *= 0.99;                         // damping
+        c.ang += c.vel * dt;
+        c.settle -= dt;
+        // hard deadline, not a velocity test: a lightly-damped pendulum can swing
+        // below any threshold forever, which would pin the rAF loop on for the
+        // whole session. By now the swing is tiny, so baking mid-swing is invisible.
+        const atRest = c.settle <= 0;
+        drawCable(atRest ? gg : fg, c);
+        c.done = atRest;
+      }
+      cables = cables.filter((c) => !c.done);
+
+      // flicker: exposed panel areas pulse; occasional glitch band tears across
+      let flickering = false;
+      for (const b of breaches) {
+        if (b.depth < 1 || b.depth >= 3) continue; // only live panel/backlight flickers
+        if (Math.random() < 0.06) {
+          flickering = true;
+          fg.save();
+          fg.globalCompositeOperation = 'lighter';
+          fg.fillStyle = 'rgba(120,170,255,' + rand(0.05, 0.16).toFixed(2) + ')';
+          blobPath(fg, b.x, b.y, b.r * 0.9, 0.15);
+          fg.fill();
+          fg.restore();
+        }
+      }
+      if (now < glitchUntil && breaches.length) {
+        const b = breaches[breaches.length - 1];
+        const yy = b.y + rand(-b.r, b.r);
+        fg.fillStyle = 'rgba(150,220,255,0.22)';
+        fg.fillRect(0, yy, w, rand(2, 9));
+        fg.fillStyle = 'rgba(255,80,120,0.16)';
+        fg.fillRect(0, yy + rand(-6, 6), w, rand(1, 4));
+        flickering = true;
+      }
+
+      return sparks.length + shards.length + cables.length > 0 || flickering ||
+             now < glitchUntil;
+    },
+
+    reset() {
+      sparks = [];
+      shards = [];
+      cables = [];
+      breaches = [];
+      glitchUntil = 0;
+    },
+  };
+})();
+
 // Weapon: hammer — click = one smash. Registers into the global tool registry
 // (this file is concatenated BEFORE the engine by scripts/sync.js).
 (function () {
@@ -49,7 +470,8 @@
     },
 
     // One dent: dark radial bruise + jagged radiating cracks + white glints.
-    hit(ctx, x, y) {
+    // Heavy blunt force — punches deep fast, so a few hits on one spot go through.
+    hit(ctx, x, y, api) {
       const rand = (a, b) => a + Math.random() * (b - a);
       const R = rand(22, 34); // dent radius
       ctx.save();
@@ -94,6 +516,9 @@
         ctx.stroke();
       }
       ctx.restore();
+      // breach LAST: punching the hole must happen after this hit's own art, or
+      // the bruise above would paint straight back over the exposed hardware
+      if (api) api.breach(x, y, R * 0.95, rand(0.55, 0.9));
     },
 
     // Thunk: noise burst through a lowpass + fast-decaying low sine. Random pitch.
@@ -229,7 +654,7 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       // dark rim under the light disc — keeps the impact visible on light pages
       const rim = ctx.createRadialGradient(x, y, 0, x, y, 9);
       rim.addColorStop(0, 'rgba(15,20,30,0.35)');
@@ -272,6 +697,9 @@
       if (impacts.length > 60) impacts.shift(); // ponytail: cap memory; oldest shatters stop extending
 
       flash(x, y);
+      // breach last so this shatter's own art doesn't cover the hole; spidering
+      // glass barely goes past the surface, so it takes many hits to break through
+      if (api) api.breach(x, y, 18, 0.2);
     },
 
     // Sharp clink + tinkle tail of tiny shard pings.
@@ -411,7 +839,7 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       // recoil spread: shots land near, not exactly on, the aim point
       x += rand(-6, 6);
       y += rand(-6, 6);
@@ -479,6 +907,9 @@
       ctx.restore();
 
       flash(x, y);
+      // breach last so the hole survives this shot's own art; the floor keeps the
+      // exposed area big enough for the strata detail to actually read
+      if (api) api.breach(x, y, Math.max(R * 1.8, 18), 1.15);
     },
 
     // Sharp crack + low thump + two decaying echo slaps.
@@ -608,7 +1039,7 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       const now = performance.now();
       if (now - lastShot > 300) burstStart = now; // gap = new burst, recoil resets
       lastShot = now;
@@ -679,6 +1110,9 @@
         vr: rand(-12, 12),
         life: 3,
       });
+      // breach last (after this round's own art) so the hole isn't repainted over;
+      // floor keeps the exposed area readable at bullet scale
+      if (api) api.breach(x, y, Math.max(R * 1.6, 16), 0.5);
     },
 
     // fx layer: simulate casings (gravity, floor bounce, fade) + flash flicker.
@@ -840,7 +1274,7 @@
 
     // Each 50ms tick: one translucent char stamp (≈20 stamps → full black in ~1s)
     // + a burst of flame particles + remember the spot for smoke.
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       const cx = x + rand(-8, 8);
       const cy = y + rand(-6, 6);
       const R = rand(16, 26);
@@ -869,6 +1303,9 @@
       // one hotspot per tick is plenty for smoke density
       hotspots.push({ x: cx, y: cy, age: 0 });
       if (hotspots.length > 90) hotspots.shift();
+      // breach last so the fresh char doesn't cover the melt-through; heat works
+      // slowly and widely — char first, then the panel gives way
+      if (api) api.breach(cx, cy, R * 0.8, 0.09);
     },
 
     frame(g, dt, w, h) {
@@ -1163,7 +1600,7 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       const now = performance.now();
       // time gap = a new stroke, not a segment from the old one
       if (!last || now - last.t > 120) {
@@ -1175,6 +1612,8 @@
       const dist = Math.hypot(x - last.x, y - last.y);
       const speed = dist / dt; // px/s
       speedSmooth += (speed - speedSmooth) * 0.3;
+
+      const stationary = dist < 2;
 
       if (dist < 2) {
         // stationary: grind a widening ragged hole
@@ -1201,6 +1640,9 @@
         spawnChips(x, y, dist > 8 ? 3 : 2, w);
       }
       last = { x: x, y: y, t: now };
+      // breach last so the fresh gash art doesn't cover the cut-through; a saw
+      // bites deep along whatever it touches, and grinding one spot digs fastest
+      if (api) api.breach(x, y, stationary ? 14 + grind * 8 : 12, stationary ? 0.28 : 0.16);
     },
 
     frame(g, dt, w, h) {
@@ -1368,7 +1810,9 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    // No api.breach() on purpose: paint splatters, it doesn't pierce. This is the
+    // one weapon that never exposes hardware, which makes the others feel harder.
+    hit(ctx, x, y, api) {
       dmgCtx = ctx;
       const color = randColor();
       const R = rand(14, 22);
@@ -1569,13 +2013,16 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       const now = performance.now();
       firing = now;
       fx_x = x; fx_y = y;
       // char the path; a time gap means a fresh start, not a long jump-cut
       if (last && now - last.t < 120) char(ctx, last.x, last.y, x, y);
       else char(ctx, x - 1, y, x, y); // dot at the impact on a fresh press
+      // a focused beam cuts clean through, fast; radius kept wide enough that the
+      // strata detail inside the slot is actually legible
+      if (api) api.breach(x, y, 16, 0.42);
       last = { x: x, y: y, t: now };
       // sparks fly off the cut point
       for (let i = 0; i < 2; i++) {
@@ -1730,6 +2177,7 @@
 
   let bugs = [];     // {x,y,dir,speed,life,legPhase,gnawAcc}
   let dmgCtx = null; // persistent canvas, captured on first click, for baking holes
+  let breachApi = null; // stashed on drop; bugs keep chewing from frame() afterwards
 
   // Draw a tiny termite at b.(x,y) heading b.dir: dark oval body + head + 6
   // flicking legs. Manual trig (no save/rotate/restore, one stroke) — cheap
@@ -1821,8 +2269,9 @@
       return { idle: u, swung: u };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       dmgCtx = ctx;
+      breachApi = api;
       const n = 8 + (Math.random() * 5 | 0);
       for (let i = 0; i < n && bugs.length < MAX_BUGS; i++) {
         bugs.push({
@@ -1862,7 +2311,12 @@
 
         // gnaw a bite roughly every 5px travelled
         b.gnawAcc += b.speed * dt;
-        if (b.gnawAcc > 5 && dmgCtx) { b.gnawAcc = 0; gnaw(dmgCtx, b.x, b.y); }
+        if (b.gnawAcc > 5 && dmgCtx) {
+          b.gnawAcc = 0;
+          gnaw(dmgCtx, b.x, b.y);
+          // slow but relentless: a swarm left alone eats right through the panel
+          if (breachApi) breachApi.breach(b.x, b.y, 14, 0.12);
+        }
 
         // fade the body over the last second of life
         g.globalAlpha = Math.min(1, b.life);
@@ -1920,6 +2374,7 @@
   let ash = [];      // {x,y,vx,vy,life,max,r}
   let liveOuts = []; // per-click output gains, so reset() can silence in-flight fuses
   let dmgCtx = null;
+  let breachApi = null; // stashed at plant time; the blast happens later, in frame()
 
   // Draw a dynamite stick centered at (x,y): red cylinder, label band, fuse
   // rising from the top with a sparking tip that burns down as `progress` → 1.
@@ -2025,6 +2480,8 @@
 
   function detonate(s, w, h) {
     crater(dmgCtx, s.x, s.y, w, h);
+    // a blast tears straight through to the chassis over a wide area
+    if (breachApi) breachApi.breach(s.x, s.y, rand(70, 100), 5);
     flashes.push({ life: 0.32, max: 0.32 });
     if (window.__SMASH__ && window.__SMASH__.shake) window.__SMASH__.shake(22, 500);
     for (let i = 0; i < 26; i++) {
@@ -2085,8 +2542,9 @@
       return { idle: u, swung: u };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       dmgCtx = ctx;
+      breachApi = api;
       sticks.push({ x: x, y: y, born: performance.now(), blown: false });
     },
 
@@ -2252,6 +2710,13 @@
   // ---- overlay canvas (fixed to the viewport — damage sticks to the "glass") ----
   // plus an fx canvas above it: cleared every frame, for transient animation
   // (casings, particles) driven by tools' optional frame(fxCtx, dt, w, h).
+  // The guts canvas sits UNDER the damage layer: hardware (LCD, backlight, PCB,
+  // chassis) is painted into it only where a weapon breaches, so holes in the
+  // damage art reveal the innards instead of a flat black core.
+  // Stack, bottom → top: page/screenshot → guts → damage → fx.
+  const guts = doc.createElement('canvas');
+  guts.style.cssText = 'position:fixed;inset:0;z-index:' + Z + ';pointer-events:none;';
+  const gutsCtx = guts.getContext('2d');
   const canvas = doc.createElement('canvas');
   canvas.style.cssText = 'position:fixed;inset:0;z-index:' + Z + ';';
   const ctx = canvas.getContext('2d');
@@ -2259,17 +2724,74 @@
   fx.style.cssText = 'position:fixed;inset:0;z-index:' + Z + ';pointer-events:none;';
   const fxCtx = fx.getContext('2d');
 
+  // Viewport can read 0 if we're injected into a hidden/throttled/oddly-embedded
+  // page; fall back so the canvases are never born 0x0 (they'd stay blank forever).
+  const vw = () => innerWidth || doc.documentElement.clientWidth || 1280;
+  const vh = () => innerHeight || doc.documentElement.clientHeight || 800;
+
   function sizeCanvas(c, c2d) {
     const dpr = window.devicePixelRatio || 1;
-    c.width = innerWidth * dpr;
-    c.height = innerHeight * dpr;
-    c.style.width = innerWidth + 'px';
-    c.style.height = innerHeight + 'px';
+    const w = vw(), h = vh();
+    c.width = w * dpr;
+    c.height = h * dpr;
+    c.style.width = w + 'px';
+    c.style.height = h + 'px';
     c2d.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
   }
+
+  // ---- depth grid: how deep each cell has been chewed (0 = pristine glass) ----
+  // 16px cells: small enough that narrow weapons (bullets, laser) still register
+  // on the cell they actually hit. ~8k floats at 1080p — nothing.
+  const CELL = 16;
+  let depth = null, gw = 0, gh = 0;
+  function sizeDepth() {
+    gw = Math.ceil(vw() / CELL) + 1;
+    gh = Math.ceil(vh() / CELL) + 1;
+    depth = new Float32Array(gw * gh);
+  }
+  function depthAt(x, y) {
+    const i = (Math.floor(y / CELL) * gw + Math.floor(x / CELL));
+    return depth && i >= 0 && i < depth.length ? depth[i] : 0;
+  }
+  // Raise depth over a disc, returning the deepest value reached.
+  function addDepth(x, y, radius, amount) {
+    if (!depth) return 0;
+    let deepest = 0;
+    // The cell you actually hit always takes the full bite, even if its centre
+    // falls outside a narrow breach radius — otherwise pinpoint weapons could
+    // pound one spot forever without ever digging.
+    const hi = Math.floor(y / CELL) * gw + Math.floor(x / CELL);
+    if (hi >= 0 && hi < depth.length) {
+      depth[hi] = Math.min(5, depth[hi] + amount);
+      deepest = depth[hi];
+    }
+    const c0 = Math.max(0, Math.floor((x - radius) / CELL));
+    const c1 = Math.min(gw - 1, Math.floor((x + radius) / CELL));
+    const r0 = Math.max(0, Math.floor((y - radius) / CELL));
+    const r1 = Math.min(gh - 1, Math.floor((y + radius) / CELL));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const i = r * gw + c;
+        if (i === hi) continue; // already took the full bite above
+        const dx = (c + 0.5) * CELL - x, dy = (r + 0.5) * CELL - y;
+        const d = Math.hypot(dx, dy);
+        if (d > radius) continue;
+        // full bite at the centre, tapering to nothing at the rim
+        depth[i] = Math.min(5, depth[i] + amount * (1 - d / radius));
+        if (depth[i] > deepest) deepest = depth[i];
+      }
+    }
+    return deepest;
+  }
+
   function resize() {
-    sizeCanvas(canvas, ctx); // damage wipes on resize (fine for a toy)
+    sizeCanvas(guts, gutsCtx); // damage wipes on resize (fine for a toy)
+    sizeCanvas(canvas, ctx);
     sizeCanvas(fx, fxCtx);
+    sizeDepth();
+    // the strata art is gone with the pixels — drop the remembered breaches too,
+    // or flicker/glitch would keep firing at coordinates that no longer have holes
+    if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
   }
   resize();
 
@@ -2279,11 +2801,14 @@
   function fxTick(t) {
     const dt = Math.min((t - fxLast) / 1000, 0.05);
     fxLast = t;
-    fxCtx.clearRect(0, 0, innerWidth, innerHeight);
+    fxCtx.clearRect(0, 0, vw(), vh());
     let live = false;
-    for (const tl of tools) if (tl.frame && tl.frame(fxCtx, dt, innerWidth, innerHeight)) live = true;
+    for (const tl of tools) if (tl.frame && tl.frame(fxCtx, dt, vw(), vh())) live = true;
+    // guts animation (sparks, falling shards, dangling cables, flicker) shares the loop
+    const g = window.__SMASH_GUTS__;
+    if (g && g.frame(fxCtx, gutsCtx, dt, vw(), vh())) live = true;
     if (live && fxRunning) requestAnimationFrame(fxTick);
-    else { fxRunning = false; fxCtx.clearRect(0, 0, innerWidth, innerHeight); }
+    else { fxRunning = false; fxCtx.clearRect(0, 0, vw(), vh()); }
   }
   function startFx() {
     if (fxRunning) return;
@@ -2299,7 +2824,7 @@
   function shakeStep() {
     const now = performance.now();
     if (now >= shakeEnd) {
-      canvas.style.transform = fx.style.transform = '';
+      canvas.style.transform = fx.style.transform = guts.style.transform = '';
       shakeRAF = 0;
       return;
     }
@@ -2307,7 +2832,7 @@
     const m = shakeMag * k * k;
     const t = 'translate(' + ((Math.random() * 2 - 1) * m).toFixed(1) + 'px,' +
               ((Math.random() * 2 - 1) * m).toFixed(1) + 'px)';
-    canvas.style.transform = fx.style.transform = t;
+    canvas.style.transform = fx.style.transform = guts.style.transform = t;
     shakeRAF = requestAnimationFrame(shakeStep);
   }
   function shake(mag, dur) {
@@ -2508,7 +3033,10 @@
 
   // ---- actions ----
   function reset() {
-    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    ctx.clearRect(0, 0, vw(), vh());
+    gutsCtx.clearRect(0, 0, vw(), vh());
+    if (depth) depth.fill(0); // screen is pristine glass again
+    if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
     tools.forEach((t) => t.reset && t.reset());
   }
 
@@ -2527,29 +3055,32 @@
       const host = window.__SMASH_HOST__;
       let backdrop = null;
       if (host && host.capture) {
-        const prev = [bar, fx, canvas].map((el) => el.style.display);
-        bar.style.display = fx.style.display = canvas.style.display = 'none';
+        const hide = [bar, fx, canvas, guts];
+        const prev = hide.map((el) => el.style.display);
+        hide.forEach((el) => (el.style.display = 'none'));
         try {
           // setTimeout (not rAF) so the hide still lands even if rendering is throttled
           await new Promise((r) => setTimeout(r, 32));
           backdrop = await host.capture();
         } catch (e) { backdrop = null; }
-        [bar, fx, canvas].forEach((el, i) => (el.style.display = prev[i]));
+        hide.forEach((el, i) => (el.style.display = prev[i]));
       }
 
       const W = canvas.width, H = canvas.height;
       const out = makeCanvas(W, H);
       const octx = out.getContext('2d');
       let noteBackdropMissing = !!(host && host.capture) && !backdrop;
+      // same stacking order as on screen: backdrop → guts → damage
+      const layers = () => { octx.drawImage(guts, 0, 0); octx.drawImage(canvas, 0, 0); };
       if (backdrop) {
         await new Promise((res) => {
           const img = new Image();
-          img.onload = () => { octx.drawImage(img, 0, 0, W, H); octx.drawImage(canvas, 0, 0); res(); };
-          img.onerror = () => { noteBackdropMissing = true; octx.drawImage(canvas, 0, 0); res(); };
+          img.onload = () => { octx.drawImage(img, 0, 0, W, H); layers(); res(); };
+          img.onerror = () => { noteBackdropMissing = true; layers(); res(); };
           img.src = backdrop;
         });
       } else {
-        octx.drawImage(canvas, 0, 0);
+        layers();
       }
       showPreview(out, noteBackdropMissing);
     } finally {
@@ -2607,15 +3138,18 @@
     stopAuto();
     fxRunning = false;
     if (shakeRAF) cancelAnimationFrame(shakeRAF);
+    guts.remove();
     canvas.remove();
     fx.remove();
     bar.remove();
+    if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
     if (previewDim) { previewDim.remove(); previewDim = null; } // don't leak an open preview
     clearTimeout(swingTimer);
     if (ac) ac.close();
     tools.forEach((t) => t.reset && t.reset());
     delete window.__SMASH__;
     delete window.__SMASH_TOOLS__; // concat re-registers tools on next injection
+    delete window.__SMASH_GUTS__;  // ditto — never leave closures on the host page
     delete window.__SMASH_HOST__;  // extension re-injects host.js; desktop is closing anyway
     // desktop app: quitting the toy quits the app (bridge set by desktop preload)
     const d = window.__SMASH_DESKTOP__;
@@ -2626,11 +3160,42 @@
   let mx = 0, my = 0;      // tracked cursor for auto-fire follow
   let autoTimer = 0;       // interval id while holding an auto weapon
 
+  // Hardware-breach API handed to weapons as hit()'s 4th arg. Tools that ignore
+  // it keep working unchanged (backward-compatible). Implementation lives in
+  // guts.js, which registers itself as window.__SMASH_GUTS__ before the engine.
+  const G = window.__SMASH_GUTS__;
+  let lastZap = 0;
+  const breachApi = {
+    // Chew `amount` deeper over a disc and repaint the exposed strata there.
+    breach(x, y, radius, amount) {
+      const wasDeep = depthAt(x, y) >= 1;
+      const d = addDepth(x, y, radius, amount);
+      if (G) {
+        G.paint(gutsCtx, x, y, radius, d, depthAt);
+        // once breached, clear the damage art covering the hole so the guts show
+        if (d >= 1) G.punch(ctx, x, y, radius);
+      }
+      if (d >= 1) {
+        startFx(); // sparks/shards/flicker need the fx loop running
+        // zap only on the moment of first breach-through, not every later hit —
+        // and throttled, since a spray can cross the threshold on several
+        // adjacent cells within one burst
+        if (!wasDeep && G && G.zap && performance.now() - lastZap > 90 && ensureAudio()) {
+          lastZap = performance.now();
+          G.zap(ac, masterGain || master);
+        }
+      }
+      return d;
+    },
+    depthAt: depthAt,
+    spark(x, y, n) { if (G) { G.spark(x, y, n); startFx(); } },
+  };
+
   function fireOnce(x, y) {
-    tool.hit(ctx, x, y);
+    tool.hit(ctx, x, y, breachApi);
     if (tool.soundLoop) startLoop(); // looping weapons roar continuously instead of per-hit
     else playSound();
-    if (tool.frame) startFx();
+    if (tool.frame || G) startFx();
   }
 
   function stopAuto() {
@@ -2677,6 +3242,7 @@
   addEventListener('resize', resize);
   addEventListener('keydown', onKey, true);
 
+  doc.documentElement.appendChild(guts); // under the damage layer — order matters
   doc.documentElement.appendChild(canvas);
   doc.documentElement.appendChild(fx);
   doc.documentElement.appendChild(bar);

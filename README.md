@@ -29,6 +29,18 @@ Pick a weapon from the slim toolbar on the left edge (hover to reveal it), or pr
 | 9 | **Termites** | Drop a swarm that wanders and gnaws holes on its own. |
 | 0 | **Dynamite** | Plant a stick with a burning fuse — flash, screen-shake, crater, cracks to the edges. |
 
+## Break all the way through
+
+Damage has depth. Keep working the same spot and you punch clean through the screen into
+the hardware behind it — cracked glass gives way to the LCD panel (subpixel grid, bleeding
+crystal), then the glowing backlight sheet, then the circuit board, and finally the bare
+chassis with loose wires. Sparks spit from fresh breaches, glass shards drop away, and
+ribbon cables dangle out of the deep tears.
+
+Every weapon digs at its own rate: a bullet punches through in a couple of shots, dynamite
+craters straight to the chassis, termites slowly eat their way in, and paintball never gets
+past the surface — it's paint.
+
 The toolbar also has a 📷 button to save a screenshot of your carnage (page/desktop + damage composited into a PNG), and a speaker button to mute or adjust volume (remembered across sessions).
 
 ## Try it

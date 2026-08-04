@@ -14,6 +14,7 @@
   let ash = [];      // {x,y,vx,vy,life,max,r}
   let liveOuts = []; // per-click output gains, so reset() can silence in-flight fuses
   let dmgCtx = null;
+  let breachApi = null; // stashed at plant time; the blast happens later, in frame()
 
   // Draw a dynamite stick centered at (x,y): red cylinder, label band, fuse
   // rising from the top with a sparking tip that burns down as `progress` → 1.
@@ -119,6 +120,8 @@
 
   function detonate(s, w, h) {
     crater(dmgCtx, s.x, s.y, w, h);
+    // a blast tears straight through to the chassis over a wide area
+    if (breachApi) breachApi.breach(s.x, s.y, rand(70, 100), 5);
     flashes.push({ life: 0.32, max: 0.32 });
     if (window.__SMASH__ && window.__SMASH__.shake) window.__SMASH__.shake(22, 500);
     for (let i = 0; i < 26; i++) {
@@ -179,8 +182,9 @@
       return { idle: u, swung: u };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       dmgCtx = ctx;
+      breachApi = api;
       sticks.push({ x: x, y: y, born: performance.now(), blown: false });
     },
 

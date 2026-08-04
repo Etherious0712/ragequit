@@ -49,7 +49,8 @@
     },
 
     // One dent: dark radial bruise + jagged radiating cracks + white glints.
-    hit(ctx, x, y) {
+    // Heavy blunt force — punches deep fast, so a few hits on one spot go through.
+    hit(ctx, x, y, api) {
       const rand = (a, b) => a + Math.random() * (b - a);
       const R = rand(22, 34); // dent radius
       ctx.save();
@@ -94,6 +95,9 @@
         ctx.stroke();
       }
       ctx.restore();
+      // breach LAST: punching the hole must happen after this hit's own art, or
+      // the bruise above would paint straight back over the exposed hardware
+      if (api) api.breach(x, y, R * 0.95, rand(0.55, 0.9));
     },
 
     // Thunk: noise burst through a lowpass + fast-decaying low sine. Random pitch.

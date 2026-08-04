@@ -81,7 +81,7 @@
       return { idle: draw(false), swung: draw(true) };
     },
 
-    hit(ctx, x, y) {
+    hit(ctx, x, y, api) {
       // recoil spread: shots land near, not exactly on, the aim point
       x += rand(-6, 6);
       y += rand(-6, 6);
@@ -149,6 +149,9 @@
       ctx.restore();
 
       flash(x, y);
+      // breach last so the hole survives this shot's own art; the floor keeps the
+      // exposed area big enough for the strata detail to actually read
+      if (api) api.breach(x, y, Math.max(R * 1.8, 18), 1.15);
     },
 
     // Sharp crack + low thump + two decaying echo slaps.
