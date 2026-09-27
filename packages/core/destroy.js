@@ -49,10 +49,12 @@
   // on the cell they actually hit. ~8k floats at 1080p — nothing.
   const CELL = 16;
   let depth = null, gw = 0, gh = 0;
+  let breachedCells = 0; // cells at depth >= 1 — drives the ambient hum level
   function sizeDepth() {
     gw = Math.ceil(vw() / CELL) + 1;
     gh = Math.ceil(vh() / CELL) + 1;
     depth = new Float32Array(gw * gh);
+    breachedCells = 0;
   }
   function depthAt(x, y) {
     const i = (Math.floor(y / CELL) * gw + Math.floor(x / CELL));
@@ -67,6 +69,7 @@
     // pound one spot forever without ever digging.
     const hi = Math.floor(y / CELL) * gw + Math.floor(x / CELL);
     if (hi >= 0 && hi < depth.length) {
+      if (depth[hi] < 1 && depth[hi] + amount >= 1) breachedCells++;
       depth[hi] = Math.min(5, depth[hi] + amount);
       deepest = depth[hi];
     }
@@ -82,11 +85,55 @@
         const d = Math.hypot(dx, dy);
         if (d > radius) continue;
         // full bite at the centre, tapering to nothing at the rim
-        depth[i] = Math.min(5, depth[i] + amount * (1 - d / radius));
+        const add = amount * (1 - d / radius);
+        if (depth[i] < 1 && depth[i] + add >= 1) breachedCells++;
+        depth[i] = Math.min(5, depth[i] + add);
         if (depth[i] > deepest) deepest = depth[i];
       }
     }
     return deepest;
+  }
+
+  // ---- OSI layer HUD: which layer of the stack you've dug down to so far ----
+  // Layer names come from guts.js (it owns what's under the screen); index 0 is
+  // L7 Application, the untouched surface.
+  const G = window.__SMASH_GUTS__;
+  const layerNames = (G && G.LAYERS) || ['L7 \u00b7 Application'];
+  let layerIdx = -1;
+  const hud = doc.createElement('div');
+  hud.style.cssText =
+    'position:fixed;top:12px;right:12px;z-index:' + Z + ';pointer-events:none;' +
+    'padding:6px 12px;border-radius:999px;background:rgba(20,20,28,0.78);color:#eee;' +
+    'font:600 12px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.04em;' +
+    'box-shadow:0 0 0 1px rgba(255,255,255,0.12);transition:box-shadow .5s ease,transform .5s ease;';
+  function setLayer(i) {
+    i = Math.max(0, Math.min(layerNames.length - 1, i));
+    if (i === layerIdx) return;
+    const deeper = i > layerIdx && layerIdx >= 0;
+    layerIdx = i;
+    hud.textContent = 'OSI ' + layerNames[i];
+    if (deeper) {
+      // flash on entering a new, deeper layer
+      hud.style.transition = 'none';
+      hud.style.boxShadow = '0 0 0 2px #e0472f,0 0 22px rgba(224,71,47,0.8)';
+      hud.style.transform = 'scale(1.15)';
+      void hud.offsetWidth; // commit the flash before easing back
+      hud.style.transition = 'box-shadow .6s ease,transform .6s ease';
+      hud.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.12)';
+      hud.style.transform = 'scale(1)';
+    }
+  }
+  setLayer(0);
+
+  // ---- circuit ambience: mains hum that swells with the damage, plus random
+  // crackles/sparks from the exposed wreckage. Sound design lives in guts.js;
+  // the engine only schedules it. Audio context is created lazily further down.
+  let hum = null;        // guts hum handle {set, stop}
+  let crackleTimer = 0;
+  function stopAmbience() {
+    if (hum) { hum.stop(); hum = null; }
+    clearTimeout(crackleTimer);
+    crackleTimer = 0;
   }
 
   function resize() {
@@ -94,6 +141,8 @@
     sizeCanvas(canvas, ctx);
     sizeCanvas(fx, fxCtx);
     sizeDepth();
+    setLayer(0);
+    stopAmbience();
     // the strata art is gone with the pixels — drop the remembered breaches too,
     // or flicker/glitch would keep firing at coordinates that no longer have holes
     if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
@@ -199,6 +248,26 @@
     if (loopStop) { loopStop(); loopStop = null; }
   }
 
+  // Start/swell the hum once something is breached. Level tracks how much of
+  // the screen is torn open (a quarter of the grid = full swell); it routes
+  // through masterGain so mute and the volume slider apply.
+  function updateAmbience() {
+    if (!breachedCells || !G || !ensureAudio()) return;
+    if (!hum && G.hum) hum = G.hum(ac, masterGain);
+    if (hum) hum.set(0.015 + 0.055 * Math.min(1, (breachedCells / (gw * gh)) * 4));
+    if (!crackleTimer && G.crackle) scheduleCrackle();
+  }
+  // Irregular crackle + sparks from a random breach, every 1.5–5 s while the
+  // screen has holes. A timer chain (not rAF) so it keeps going while idle.
+  function scheduleCrackle() {
+    crackleTimer = setTimeout(() => {
+      crackleTimer = 0;
+      if (!breachedCells || !ac) return;
+      if (G.randomSpark()) { startFx(); G.crackle(ac, masterGain); }
+      scheduleCrackle();
+    }, 1500 + Math.random() * 3500);
+  }
+
   // ---- weapon arming ----
   const makeCanvas = (w, h) => Object.assign(doc.createElement('canvas'), { width: w, height: h });
   let tool = null;
@@ -281,6 +350,22 @@
     }
   }
 
+  // envelope glyph for the feedback button
+  function drawMailGlyph(g, size) {
+    const s = size / 24;
+    g.clearRect(0, 0, size, size);
+    g.fillStyle = '#eee';
+    g.beginPath();
+    g.roundRect(3 * s, 6 * s, 18 * s, 13 * s, 2 * s);
+    g.fill();
+    g.strokeStyle = '#1a1a20';
+    g.lineWidth = 1.6 * s;
+    g.lineJoin = 'round';
+    g.beginPath();
+    g.moveTo(4.5 * s, 7.5 * s); g.lineTo(12 * s, 13.5 * s); g.lineTo(19.5 * s, 7.5 * s);
+    g.stroke();
+  }
+
   tools.forEach((t, i) => {
     const icon = makeCanvas(24, 24);
     t.icon(icon.getContext('2d'), 24);
@@ -293,6 +378,9 @@
   const camIcon = makeCanvas(24, 24);
   drawCameraGlyph(camIcon.getContext('2d'), 24);
   barBtn(camIcon, 'Save a screenshot', save);
+  const mailIcon = makeCanvas(24, 24);
+  drawMailGlyph(mailIcon.getContext('2d'), 24);
+  barBtn(mailIcon, 'Send feedback', openFeedback);
   barBtn(String.fromCharCode(0x21ba), 'Reset (R)', reset);
   barBtn(String.fromCharCode(0x2715), 'Quit (Esc)', quit);
 
@@ -341,6 +429,9 @@
     ctx.clearRect(0, 0, vw(), vh());
     gutsCtx.clearRect(0, 0, vw(), vh());
     if (depth) depth.fill(0); // screen is pristine glass again
+    breachedCells = 0;
+    stopAmbience();
+    setLayer(0);
     if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
     tools.forEach((t) => t.reset && t.reset());
   }
@@ -360,7 +451,7 @@
       const host = window.__SMASH_HOST__;
       let backdrop = null;
       if (host && host.capture) {
-        const hide = [bar, fx, canvas, guts];
+        const hide = [bar, hud, fx, canvas, guts];
         const prev = hide.map((el) => el.style.display);
         hide.forEach((el) => (el.style.display = 'none'));
         try {
@@ -435,6 +526,103 @@
     previewDim = dim;
   }
 
+  // ---- feedback: a small form that opens the user's OWN mail app with a
+  // pre-filled draft (mailto:). Nothing is sent by us — the user reviews and
+  // sends it themselves. Host may provide openMail(url) (the extension opens it
+  // via the background worker; desktop hands it to the OS); otherwise a plain
+  // link click. Built in a closed shadow root so page CSS can't restyle it.
+  const FEEDBACK_TO = 'etherious0712@gmail.com';
+  let feedbackDim = null;
+  function closeFeedback() {
+    if (feedbackDim) { feedbackDim.remove(); feedbackDim = null; }
+  }
+  function openFeedback() {
+    if (feedbackDim) return;
+    stopAuto();
+    const host = window.__SMASH_HOST__ || {};
+    const info = host.info || {};
+    const el = (tag, css, text) => {
+      const e = doc.createElement(tag);
+      if (css) e.style.cssText = css;
+      if (text) e.textContent = text;
+      return e;
+    };
+    const wrap = el('div', 'all:initial;position:fixed;inset:0;z-index:' + Z + ';');
+    const root = wrap.attachShadow({ mode: 'closed' });
+    const dim = el('div',
+      'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;' +
+      'font:14px/1.45 system-ui,sans-serif;color:#eee;');
+    const card = el('div',
+      'width:min(440px,calc(100vw - 32px));box-sizing:border-box;background:#1b1b24;border-radius:14px;padding:20px;' +
+      'box-shadow:0 12px 50px rgba(0,0,0,0.6),0 0 0 1px rgba(255,255,255,0.1);display:flex;flex-direction:column;gap:12px;');
+    card.appendChild(el('div', 'font-size:18px;font-weight:700;', 'Send feedback'));
+    card.appendChild(el('div', 'opacity:.75;font-size:13px;',
+      'This opens your own mail app with a draft to the developer. Nothing is sent until you hit send there.'));
+
+    const field = 'all:unset;box-sizing:border-box;width:100%;background:#0f0f15;color:#eee;border-radius:8px;' +
+      'padding:9px 10px;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.18);font:14px/1.4 system-ui,sans-serif;';
+    const type = el('select', field + 'cursor:pointer;');
+    ['Bug report', 'Feature idea', 'Other'].forEach((t) => {
+      const o = el('option', 'background:#1b1b24;color:#eee;', t);
+      o.value = t;
+      type.appendChild(o);
+    });
+    card.appendChild(type);
+    const text = el('textarea', field + 'min-height:120px;resize:vertical;white-space:pre-wrap;');
+    text.placeholder = 'What happened, or what would you like to see?';
+    text.maxLength = 1500;
+    card.appendChild(text);
+    card.appendChild(el('div', 'font-size:12px;opacity:.7;',
+      'Tip: email drafts can\'t carry attachments from here \u2014 save a screenshot with the camera button and attach it yourself.'));
+
+    const addrRow = el('div', 'display:flex;gap:8px;align-items:center;font-size:12px;');
+    const addr = el('input', field + 'padding:6px 8px;font-size:12px;flex:1;');
+    addr.readOnly = true;
+    addr.value = FEEDBACK_TO;
+    const status = el('div', 'font-size:12px;min-height:16px;color:#9fd49f;');
+    const btn = (label, bg, onClick) => {
+      const b = el('button', 'all:unset;cursor:pointer;padding:8px 16px;border-radius:8px;background:' + bg + ';color:#fff;font-weight:600;font:600 14px/1.2 system-ui,sans-serif;', label);
+      b.onclick = onClick;
+      return b;
+    };
+    const copyBtn = btn('Copy address', 'rgba(255,255,255,0.12)', () => {
+      const done = () => (status.textContent = 'Address copied.');
+      const fallback = () => { addr.select(); status.textContent = 'Press Ctrl+C to copy the address.'; };
+      try {
+        navigator.clipboard.writeText(FEEDBACK_TO).then(done, fallback);
+      } catch (e) { fallback(); }
+    });
+    copyBtn.style.padding = '6px 10px';
+    copyBtn.style.fontSize = '12px';
+    addrRow.appendChild(addr);
+    addrRow.appendChild(copyBtn);
+    card.appendChild(addrRow);
+    card.appendChild(status);
+
+    const row = el('div', 'display:flex;gap:10px;justify-content:flex-end;');
+    row.appendChild(btn('Cancel', 'rgba(255,255,255,0.15)', closeFeedback));
+    row.appendChild(btn('Open email draft', '#e0472f', () => {
+      const body = text.value.slice(0, 1500) + '\n\n---\n' +
+        'ragequit ' + (info.version || 'dev') + ' (' + (info.platform || 'dev') + ')\n' +
+        navigator.userAgent;
+      const url = 'mailto:' + FEEDBACK_TO +
+        '?subject=' + encodeURIComponent('[ragequit] ' + type.value) +
+        '&body=' + encodeURIComponent(body);
+      if (host.openMail) host.openMail(url);
+      else { const a = doc.createElement('a'); a.href = url; a.click(); }
+      status.textContent = 'Opening your mail app\u2026 If nothing happens, email the address above directly.';
+    }));
+    card.appendChild(row);
+    dim.appendChild(card);
+    dim.addEventListener('mousedown', (e) => { if (e.target === dim) closeFeedback(); });
+    root.appendChild(dim);
+    // typing belongs to the form: keep keystrokes from bubbling to page shortcuts
+    ['keydown', 'keyup', 'keypress'].forEach((t) => wrap.addEventListener(t, (e) => e.stopPropagation()));
+    doc.documentElement.appendChild(wrap);
+    feedbackDim = wrap;
+    text.focus();
+  }
+
   function quit() {
     removeEventListener('resize', resize);
     removeEventListener('keydown', onKey, true);
@@ -447,8 +635,11 @@
     canvas.remove();
     fx.remove();
     bar.remove();
+    hud.remove();
+    stopAmbience();
     if (window.__SMASH_GUTS__) window.__SMASH_GUTS__.reset();
     if (previewDim) { previewDim.remove(); previewDim = null; } // don't leak an open preview
+    closeFeedback();
     clearTimeout(swingTimer);
     if (ac) ac.close();
     tools.forEach((t) => t.reset && t.reset());
@@ -468,19 +659,23 @@
   // Hardware-breach API handed to weapons as hit()'s 4th arg. Tools that ignore
   // it keep working unchanged (backward-compatible). Implementation lives in
   // guts.js, which registers itself as window.__SMASH_GUTS__ before the engine.
-  const G = window.__SMASH_GUTS__;
   let lastZap = 0;
   const breachApi = {
     // Chew `amount` deeper over a disc and repaint the exposed strata there.
     breach(x, y, radius, amount) {
       const wasDeep = depthAt(x, y) >= 1;
       const d = addDepth(x, y, radius, amount);
+      if (G && G.layerOf) {
+        const li = G.layerOf(d);
+        if (li > layerIdx) setLayer(li); // HUD only ever goes deeper until reset
+      }
       if (G) {
         G.paint(gutsCtx, x, y, radius, d, depthAt);
         // once breached, clear the damage art covering the hole so the guts show
         if (d >= 1) G.punch(ctx, x, y, radius);
       }
       if (d >= 1) {
+        updateAmbience();
         startFx(); // sparks/shards/flicker need the fx loop running
         // zap only on the moment of first breach-through, not every later hit —
         // and throttled, since a spray can cross the threshold on several
@@ -532,6 +727,11 @@
   addEventListener('blur', stopAuto);
 
   function onKey(e) {
+    // the feedback form needs the keyboard for typing: only Esc is ours
+    if (feedbackDim) {
+      if (e.key === 'Escape') { e.stopPropagation(); closeFeedback(); }
+      return;
+    }
     // while the save preview is open it owns the keyboard: Esc closes it, nothing else fires
     if (previewDim) {
       if (e.key === 'Escape') { e.stopPropagation(); previewDim.remove(); previewDim = null; }
@@ -551,6 +751,7 @@
   doc.documentElement.appendChild(canvas);
   doc.documentElement.appendChild(fx);
   doc.documentElement.appendChild(bar);
+  doc.documentElement.appendChild(hud);
   arm(0);
   collapse();
 

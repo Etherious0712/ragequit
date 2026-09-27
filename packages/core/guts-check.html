@@ -11,8 +11,10 @@
 </script>
 <script>
   const G = window.__SMASH_GUTS__;
-  const labels = ['1.5 — LCD panel', '2.5 — backlight', '3.5 — circuit board', '4.5 — chassis void'];
-  [1.5, 2.5, 3.5, 4.5].forEach((d, i) => {
+  // depth values that expose 1..6 OSI strata (layerOf = floor(d * 1.2))
+  const depths = [1, 1.7, 2.5, 3.4, 4.2, 5];
+  depths.forEach((d, i) => {
+    const labels = depths.map((v) => v + ' — ' + G.LAYERS[G.layerOf(v)]);
     const cv = document.createElement('canvas');
     cv.width = 230; cv.height = 230;
     const g = cv.getContext('2d');

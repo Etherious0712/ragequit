@@ -1,10 +1,12 @@
-// ragequit hardware guts — what's *under* the screen.
+// ragequit hardware guts — what's *under* the screen, modelled as the OSI stack.
 //
 // The engine keeps a depth grid (0 = pristine glass, 5 = punched clean through)
 // and a dedicated canvas beneath the damage layer. Weapons call
 // api.breach(x, y, radius, amount); this module paints the strata that the
-// breach has exposed, so holes reveal LCD → backlight → PCB → chassis instead of
-// a flat black core. Registers as window.__SMASH_GUTS__ before the engine runs.
+// breach has exposed. The surface is L7 Application (the page); digging peels
+// L6 Presentation → L5 Session → L4 Transport → L3 Network → L2 Data Link →
+// L1 Physical (circuit board, copper, fibre, chassis). Also owns the ambient
+// circuit audio (mains hum, crackle). Registers as window.__SMASH_GUTS__ before the engine runs.
 (function () {
   'use strict';
 
@@ -42,68 +44,193 @@
     g.closePath();
   }
 
-  // ---- strata (each draws INSIDE an already-clipped blob) ----
+  // ---- OSI strata (each draws INSIDE an already-clipped blob) ----
+  // The surface is L7 Application: the page itself plus the damage layer's
+  // cracks. Each breach level peels one layer further down the stack, ending at
+  // L1 Physical — the actual copper, fibre and circuit board.
 
-  // 1) LCD panel: pixel grid + polarizer sheen + bled liquid-crystal colour.
-  function drawLcd(g, x, y, r) {
-    g.fillStyle = '#0d1014';
+  const hex = (n) => {
+    let s = '';
+    for (let i = 0; i < n; i++) s += '0123456789abcdef'[Math.random() * 16 | 0];
+    return s;
+  };
+  const mono = (px) => 'bold ' + px + 'px ui-monospace,Menlo,Consolas,monospace';
+  // Scatter short labels across the blob. Font scales with the hole but stays
+  // readable-ish; tiny holes just get texture, which is fine.
+  function scatterText(g, x, y, r, words, color, n) {
+    const fs = Math.max(6, Math.min(11, r * 0.16)) | 0;
+    g.font = mono(fs);
+    g.textBaseline = 'middle';
+    g.fillStyle = color;
+    for (let i = 0; i < n; i++) {
+      g.fillText(typeof words === 'function' ? words() : pick(words),
+        x + rand(-r, r * 0.6), y + rand(-r * 0.9, r * 0.9));
+    }
+  }
+
+  // L6 Presentation: the rendering/encoding layer falling apart — JPEG
+  // macroblocks, RGB channel split, hex dumps and mojibake.
+  function drawPresentation(g, x, y, r) {
+    g.fillStyle = '#141019';
     g.fillRect(x - r, y - r, r * 2, r * 2);
-    // subpixel grid
-    const step = 3;
-    for (let py = y - r; py < y + r; py += step) {
-      for (let px = x - r; px < x + r; px += step) {
-        g.fillStyle = pick(['rgba(255,60,60,0.5)', 'rgba(60,255,90,0.5)', 'rgba(70,110,255,0.5)']);
-        g.fillRect(px, py, 1.2, step - 0.8);
+    const B = Math.max(6, Math.min(12, r * 0.14));
+    for (let py = y - r; py < y + r; py += B) {
+      for (let px = x - r; px < x + r; px += B) {
+        if (Math.random() < 0.55) continue;
+        const h = pick([330, 190, 50, 280, 120]);
+        g.fillStyle = 'hsla(' + h + ',' + (50 + Math.random() * 40 | 0) + '%,' + (25 + Math.random() * 35 | 0) + '%,0.8)';
+        g.fillRect(px, py, B, B);
+        if (Math.random() < 0.3) { // smeared DCT stripes inside the block
+          g.fillStyle = 'rgba(255,255,255,0.12)';
+          for (let s = 0; s < B; s += 2) g.fillRect(px, py + s, B, 1);
+        }
       }
     }
-    // polarizer rainbow sheen — the giveaway that this is a panel, not paint
-    const sheen = g.createLinearGradient(x - r, y - r, x + r, y + r);
-    sheen.addColorStop(0, 'rgba(120,200,255,0.30)');
-    sheen.addColorStop(0.4, 'rgba(190,120,255,0.20)');
-    sheen.addColorStop(0.7, 'rgba(120,255,200,0.20)');
-    sheen.addColorStop(1, 'rgba(255,180,120,0.28)');
-    g.fillStyle = sheen;
-    g.fillRect(x - r, y - r, r * 2, r * 2);
-    // bled crystal: dark inky smears creeping from the break. Kept small and
-    // semi-transparent — bigger blobs swamp the subpixel grid, which is the only
-    // cue that this is a screen panel and not just a dark surface.
-    for (let i = 0; i < 3; i++) {
-      const a = rand(0, Math.PI * 2), d = rand(0, r * 0.7);
-      const bx = x + Math.cos(a) * d, by = y + Math.sin(a) * d;
-      const bl = g.createRadialGradient(bx, by, 0, bx, by, rand(r * 0.15, r * 0.35));
-      bl.addColorStop(0, 'rgba(8,6,20,0.55)');
-      bl.addColorStop(1, 'rgba(8,6,20,0)');
-      g.fillStyle = bl;
-      g.fillRect(x - r, y - r, r * 2, r * 2);
+    // chromatic split: offset red/cyan bars
+    for (let i = 0; i < 4; i++) {
+      const yy = y + rand(-r, r), hh = rand(2, 6);
+      g.fillStyle = 'rgba(255,40,80,0.35)';
+      g.fillRect(x - r, yy, r * 2, hh);
+      g.fillStyle = 'rgba(40,230,255,0.35)';
+      g.fillRect(x - r + rand(3, 7), yy + rand(1, 3), r * 2, hh);
     }
+    scatterText(g, x, y, r, () => hex(2) + ' ' + hex(2) + ' ' + hex(2) + ' ' + hex(2), 'rgba(235,225,255,0.85)', 5);
+    scatterText(g, x, y, r, ['Ã©', 'â€™', '��', 'UTF-8?', '%E2%80', '&#x2F;', 'base64', 'gzip'], 'rgba(255,210,120,0.9)', 4);
   }
 
-  // 2) Backlight / diffuser: the bright white sheet that makes it read as "broken screen".
-  function drawBacklight(g, x, y, r) {
-    // Flat sheet, not a glowing ball: near-uniform fill with a slight directional
-    // gradient. A radial falloff here reads as a 3D bubble, which is wrong.
+  // L5 Session: open dialogues between endpoints — nodes, dotted keep-alive
+  // arcs, session ids and tokens.
+  function drawSession(g, x, y, r) {
     const bg = g.createLinearGradient(x - r, y - r, x + r, y + r);
-    bg.addColorStop(0, 'rgba(252,253,255,0.97)');
-    bg.addColorStop(0.5, 'rgba(240,247,255,0.95)');
-    bg.addColorStop(1, 'rgba(226,238,252,0.93)');
+    bg.addColorStop(0, '#0d1633');
+    bg.addColorStop(1, '#1a0f33');
     g.fillStyle = bg;
     g.fillRect(x - r, y - r, r * 2, r * 2);
-    // diffuser dot pattern + a couple of light-guide streaks
-    g.fillStyle = 'rgba(255,255,255,0.5)';
-    for (let i = 0; i < 40; i++) {
+    const nodes = [];
+    for (let i = 0; i < 5; i++) nodes.push([x + rand(-r * 0.8, r * 0.8), y + rand(-r * 0.8, r * 0.8)]);
+    g.setLineDash([2, 3]);
+    g.lineWidth = 1.2;
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i], b = nodes[(i + 1 + (Math.random() * 2 | 0)) % nodes.length];
+      g.strokeStyle = pick(['rgba(140,170,255,0.8)', 'rgba(200,140,255,0.75)']);
       g.beginPath();
-      g.arc(x + rand(-r, r), y + rand(-r, r), rand(0.6, 1.6), 0, Math.PI * 2);
-      g.fill();
+      g.moveTo(a[0], a[1]);
+      g.quadraticCurveTo((a[0] + b[0]) / 2 + rand(-r * 0.4, r * 0.4), (a[1] + b[1]) / 2 + rand(-r * 0.4, r * 0.4), b[0], b[1]);
+      g.stroke();
     }
-    g.strokeStyle = 'rgba(255,255,255,0.35)';
+    g.setLineDash([]);
+    for (const n of nodes) {
+      g.fillStyle = 'rgba(180,200,255,0.95)';
+      g.beginPath(); g.arc(n[0], n[1], 2.6, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(180,200,255,0.35)';
+      g.beginPath(); g.arc(n[0], n[1], 5.5, 0, Math.PI * 2); g.stroke();
+    }
+    scatterText(g, x, y, r, () => pick(['sid=', 'token:', 'cookie=', 'RPC#']) + hex(6), 'rgba(205,190,255,0.9)', 4);
+    scatterText(g, x, y, r, ['KEEPALIVE', 'RESUME', 'CHECKPOINT', 'SYNC', 'TIMEOUT'], 'rgba(255,170,220,0.85)', 2);
+  }
+
+  // L4 Transport: segments in flight — header-striped packets, SEQ/ACK, ports.
+  function drawTransport(g, x, y, r) {
+    g.fillStyle = '#10201e';
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    // flow lanes
+    g.strokeStyle = 'rgba(90,220,190,0.18)';
     g.lineWidth = 1;
-    for (let i = 0; i < 3; i++) {
-      const yy = y + rand(-r, r);
-      g.beginPath(); g.moveTo(x - r, yy); g.lineTo(x + r, yy); g.stroke();
+    for (let yy = y - r; yy < y + r; yy += 9) { g.beginPath(); g.moveTo(x - r, yy); g.lineTo(x + r, yy); g.stroke(); }
+    const fs = Math.max(6, Math.min(10, r * 0.14)) | 0;
+    g.font = mono(fs);
+    g.textBaseline = 'middle';
+    for (let i = 0; i < 7; i++) {
+      const pw = rand(r * 0.45, r * 0.9), ph = fs * 2.4;
+      const px = x + rand(-r, r * 0.5), py = y + rand(-r, r - ph);
+      g.fillStyle = 'rgba(20,60,55,0.95)';
+      g.fillRect(px, py, pw, ph);
+      g.fillStyle = pick(['rgba(80,230,190,0.9)', 'rgba(250,200,90,0.9)', 'rgba(255,120,110,0.9)']);
+      g.fillRect(px, py, pw * 0.3, ph); // header
+      g.strokeStyle = 'rgba(150,255,220,0.45)';
+      g.lineWidth = 0.8;
+      g.strokeRect(px, py, pw, ph);
+      g.fillStyle = 'rgba(10,20,20,0.95)';
+      g.fillText(pick(['SYN', 'ACK', 'FIN', 'PSH', 'RST', 'UDP']), px + 2, py + ph * 0.5);
+      g.fillStyle = 'rgba(200,255,235,0.9)';
+      g.fillText(pick(['SEQ ', 'ACK ', 'WIN ', ':']) + (Math.random() * 65535 | 0), px + pw * 0.33, py + ph * 0.5);
+      // flow arrow
+      g.fillStyle = 'rgba(150,255,220,0.6)';
+      g.beginPath();
+      g.moveTo(px + pw + 2, py + ph * 0.2); g.lineTo(px + pw + 7, py + ph * 0.5); g.lineTo(px + pw + 2, py + ph * 0.8);
+      g.fill();
     }
   }
 
-  // 3) Circuit board: PCB, copper traces, chips, solder, ribbon connector.
+  // L3 Network: a routing graph — routers, hop lines, IP addresses.
+  function drawNetwork(g, x, y, r) {
+    g.fillStyle = '#1c1030';
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    g.strokeStyle = 'rgba(160,120,255,0.12)'; // map grid
+    g.lineWidth = 1;
+    for (let v = -r; v < r; v += 12) {
+      g.beginPath(); g.moveTo(x + v, y - r); g.lineTo(x + v, y + r); g.stroke();
+      g.beginPath(); g.moveTo(x - r, y + v); g.lineTo(x + r, y + v); g.stroke();
+    }
+    const nodes = [];
+    for (let i = 0; i < 6; i++) nodes.push([x + rand(-r * 0.85, r * 0.85), y + rand(-r * 0.85, r * 0.85)]);
+    g.lineWidth = 1.4;
+    for (let i = 1; i < nodes.length; i++) {
+      const a = nodes[i], b = nodes[Math.random() * i | 0];
+      g.strokeStyle = 'rgba(190,140,255,0.7)';
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      // hop marker travelling along the link
+      const t = Math.random();
+      g.fillStyle = 'rgba(255,230,120,0.95)';
+      g.beginPath(); g.arc(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 1.8, 0, Math.PI * 2); g.fill();
+    }
+    const fs = Math.max(6, Math.min(10, r * 0.13)) | 0;
+    g.font = mono(fs);
+    g.textBaseline = 'middle';
+    for (const n of nodes) {
+      g.fillStyle = '#2a1a4a';
+      g.strokeStyle = 'rgba(210,180,255,0.95)';
+      g.lineWidth = 1.2;
+      g.beginPath(); g.arc(n[0], n[1], 4.2, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = 'rgba(230,215,255,0.9)';
+      g.fillText(pick(['10.0.', '192.168.', '172.16.']) + (Math.random() * 255 | 0) + '.' + (1 + Math.random() * 254 | 0), n[0] + 6, n[1] - 5);
+    }
+    scatterText(g, x, y, r, ['TTL=64', 'TTL=12', 'hop 3', 'ICMP', '/24', 'route'], 'rgba(255,190,240,0.8)', 2);
+  }
+
+  // L2 Data Link: raw frames — bitstream grid, MAC addresses, preambles.
+  function drawDataLink(g, x, y, r) {
+    g.fillStyle = '#050d07';
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+    const fs = Math.max(6, Math.min(9, r * 0.12)) | 0;
+    g.font = mono(fs);
+    g.textBaseline = 'top';
+    for (let py = y - r; py < y + r; py += fs + 1) {
+      let row = '';
+      for (let i = 0; i < 40; i++) row += Math.random() < 0.5 ? '0' : '1';
+      g.fillStyle = 'rgba(70,255,120,' + rand(0.25, 0.7).toFixed(2) + ')';
+      g.fillText(row, x - r + rand(-6, 0), py);
+    }
+    // frame boundaries: preamble bars
+    for (let i = 0; i < 3; i++) {
+      const yy = y + rand(-r, r);
+      g.fillStyle = 'rgba(120,255,160,0.55)';
+      for (let px = x - r; px < x + r; px += 4) g.fillRect(px, yy, 2, 3);
+    }
+    const mac = () => [hex(2), hex(2), hex(2), hex(2), hex(2), hex(2)].join(':');
+    g.textBaseline = 'middle';
+    for (let i = 0; i < 3; i++) {
+      const tx = x + rand(-r, r * 0.3), ty = y + rand(-r * 0.8, r * 0.8);
+      const s = mac();
+      g.fillStyle = 'rgba(0,0,0,0.75)';
+      g.fillRect(tx - 1, ty - fs * 0.6, g.measureText(s).width + 2, fs * 1.2);
+      g.fillStyle = 'rgba(190,255,200,0.95)';
+      g.fillText(s, tx, ty);
+    }
+    scatterText(g, x, y, r, ['ETH', 'VLAN 10', 'FCS', 'ARP', '0x0800'], 'rgba(255,240,140,0.85)', 2);
+  }
+
+  // Circuit board detail used by L1: PCB, copper traces, chips, solder.
   function drawPcb(g, x, y, r) {
     g.fillStyle = pick(['#12492f', '#123f52', '#1d3a1c']);
     g.fillRect(x - r, y - r, r * 2, r * 2);
@@ -144,7 +271,7 @@
     }
   }
 
-  // 4) Chassis void: you've punched clean through — dark metal, wires, a screw.
+  // Chassis void used by L1: dark metal, loose wires, a screw.
   function drawChassis(g, x, y, r) {
     g.fillStyle = '#07080a';
     g.fillRect(x - r, y - r, r * 2, r * 2);
@@ -174,7 +301,57 @@
     }
   }
 
-  const STRATA = [drawLcd, drawBacklight, drawPcb, drawChassis];
+  // L1 Physical: the bottom of the stack — the circuit board, with the wiring
+  // and signal carriers torn open. Deep enough and you punch into the chassis.
+  function drawPhysical(g, x, y, r) {
+    drawPcb(g, x, y, r);
+    // chassis void through the middle of the board
+    g.save();
+    blobPath(g, x + rand(-r * 0.1, r * 0.1), y + rand(-r * 0.1, r * 0.1), r * 0.32, 0.3);
+    g.clip();
+    drawChassis(g, x, y, r * 0.32);
+    g.restore();
+    // twisted copper pairs
+    for (let p = 0; p < 2; p++) {
+      const sx = x - r, sy = y + rand(-r * 0.7, r * 0.7), ey = y + rand(-r * 0.7, r * 0.7);
+      for (let k = 0; k < 2; k++) {
+        g.strokeStyle = k ? 'rgba(235,150,70,0.95)' : 'rgba(250,245,235,0.9)';
+        g.lineWidth = 1.4;
+        g.beginPath();
+        for (let i = 0; i <= 24; i++) {
+          const t = i / 24, px = sx + t * r * 2;
+          const py = sy + (ey - sy) * t + Math.sin(t * 18 + k * Math.PI) * 2.2;
+          i ? g.lineTo(px, py) : g.moveTo(px, py);
+        }
+        g.stroke();
+      }
+    }
+    // a snapped fibre strand, glowing at the break
+    const fx = x + rand(-r * 0.6, r * 0.2), fy = y + rand(-r * 0.6, r * 0.6);
+    const ex = fx + rand(r * 0.3, r * 0.8), ey = fy + rand(-r * 0.3, r * 0.3);
+    g.strokeStyle = 'rgba(120,230,255,0.85)';
+    g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(fx, fy); g.lineTo(ex, ey); g.stroke();
+    const glow = g.createRadialGradient(ex, ey, 0, ex, ey, 7);
+    glow.addColorStop(0, 'rgba(200,250,255,0.95)');
+    glow.addColorStop(1, 'rgba(80,200,255,0)');
+    g.fillStyle = glow;
+    g.fillRect(ex - 7, ey - 7, 14, 14);
+  }
+
+  // OSI layers exposed below the surface, shallowest first.
+  const STRATA = [drawPresentation, drawSession, drawTransport, drawNetwork, drawDataLink, drawPhysical];
+  const LAYERS = [
+    'L7 · Application', 'L6 · Presentation', 'L5 · Session', 'L4 · Transport',
+    'L3 · Network', 'L2 · Data Link', 'L1 · Physical',
+  ];
+  // lip colour per stratum (same order as STRATA)
+  const EDGE = ['#ff5fa2', '#8fa8ff', '#5fe6c0', '#c49bff', '#6dff8f', '#e0a94f'];
+  // How many strata a breach of depth d (0..5 on the engine's grid) exposes.
+  // Weapons were tuned for a 5-deep grid; scaling keeps them unchanged while
+  // spreading the six OSI layers over that range (dynamite's 5 = L1).
+  // Below 1 the glass hasn't been breached at all, so nothing is exposed.
+  const layerCount = (d) => (d < 1 ? 0 : Math.min(STRATA.length, Math.floor(d * 1.2)));
 
   // A dangling ribbon cable, drawn wherever it currently hangs. Used both for the
   // live swing (fx canvas) and for the one-time bake once it comes to rest.
@@ -201,23 +378,34 @@
   }
 
   window.__SMASH_GUTS__ = {
+    // OSI layer names, surface first, and which one a depth value has exposed
+    // (0 = L7, the untouched surface). The engine's HUD reads these.
+    LAYERS: LAYERS,
+    layerOf(d) { return layerCount(d); },
+
     // Paint the strata exposed by a breach. `d` is the deepest value reached;
     // each layer is drawn in a progressively smaller blob so the cross-section
     // reads as strata — shallow ring outside, deepest core in the middle.
     paint(g, x, y, radius, d, depthAt) {
       if (d < 1) return; // still just cracked glass — the damage layer covers it
-      const layers = Math.min(4, Math.floor(d));
+      const layers = layerCount(d);
       let cx = x, cy = y;
       for (let i = 0; i < layers; i++) {
         // layer i occupies a shrinking share of the breach radius, and each
         // deeper layer drifts slightly off-centre so the strata aren't
         // perfectly nested rings (that reads as stacked stickers, not damage)
-        const r = radius * (1 - i * 0.17);
+        // shallower layers survive only as thin terraced bands at the rim; the
+        // deepest exposed layer always keeps ~2/3 of the hole so it reads clearly
+        const r = radius * (1 - i * (layers > 1 ? 0.36 / (layers - 1) : 0));
         if (r < 3) break;
         if (i) { cx += rand(-radius * 0.07, radius * 0.07); cy += rand(-radius * 0.07, radius * 0.07); }
+        // one Path2D for both the clip and the lip stroke (blobPath is random,
+        // so re-running it would give a lip that wanders off the hole's edge)
+        const hole = new Path2D();
+        blobPath({ beginPath() {}, moveTo: (a, b) => hole.moveTo(a, b), lineTo: (a, b) => hole.lineTo(a, b),
+          closePath: () => hole.closePath() }, cx, cy, r, 0.26);
         g.save();
-        blobPath(g, cx, cy, r, 0.26);
-        g.clip();
+        g.clip(hole);
         STRATA[i](g, cx, cy, r);
         // inner shadow around the rim: sells "looking down into a hole" rather
         // than a flat sticker pasted on the screen
@@ -226,6 +414,11 @@
         sh.addColorStop(1, 'rgba(0,0,0,0.6)');
         g.fillStyle = sh;
         g.fillRect(cx - r, cy - r, r * 2, r * 2);
+        // layer-coloured lip so each terrace of the stack is identifiable
+        g.strokeStyle = EDGE[i];
+        g.lineWidth = 1.6; // half of it lands inside the clip
+        g.globalAlpha = 0.4; // repeated hits stack lips; keep each one faint
+        g.stroke(hole);
         g.restore();
       }
       breaches.push({ x: x, y: y, r: radius, depth: d, born: performance.now() });
@@ -245,7 +438,7 @@
       // deep tears let a ribbon cable flop out
       // a thin ribbon cable occasionally flops out of a deep tear (rare and
       // slender on purpose — a fat one reads as a plank, not a cable)
-      if (d >= 3.5 && cables.length < 6 && Math.random() < 0.16) {
+      if (layers >= 5 && cables.length < 6 && Math.random() < 0.16) {
         cables.push({
           x: x + rand(-radius * 0.4, radius * 0.4), y: y,
           len: rand(16, 40), ang: rand(-0.4, 0.4), vel: 0,
@@ -311,6 +504,94 @@
       bp.Q.value = 3;
       src.connect(bp).connect(out);
       src.start(t);
+    },
+
+    // Mains hum from the exposed electronics: a 50 Hz buzz with a few
+    // harmonics, lowpassed, with a slow unsteady wobble. Returns a handle so the
+    // engine can swell it as more of the screen is torn open, and stop it.
+    hum(ac, dest) {
+      const t = ac.currentTime;
+      const out = ac.createGain();
+      out.gain.value = 0;
+      out.connect(dest || ac.destination);
+      const lp = ac.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 520;
+      lp.Q.value = 0.7;
+      const wob = ac.createGain(); // wobble target: sits between filter and out
+      wob.gain.value = 1;
+      lp.connect(wob).connect(out);
+      const oscs = [];
+      [[50, 'sawtooth', 0.5], [100, 'square', 0.18], [150, 'sine', 0.22], [49.6, 'sawtooth', 0.25]].forEach((h) => {
+        const o = ac.createOscillator();
+        o.type = h[1];
+        o.frequency.value = h[0];
+        const gg = ac.createGain();
+        gg.gain.value = h[2];
+        o.connect(gg).connect(lp);
+        o.start(t);
+        oscs.push(o);
+      });
+      const lfo = ac.createOscillator(); // slow unsteady throb
+      lfo.frequency.value = 0.7;
+      const lfoAmt = ac.createGain();
+      lfoAmt.gain.value = 0.3;
+      lfo.connect(lfoAmt).connect(wob.gain);
+      lfo.start(t);
+      oscs.push(lfo);
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          out.gain.setTargetAtTime(Math.max(0, level), ac.currentTime, 0.4);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          const now = ac.currentTime;
+          out.gain.cancelScheduledValues(now);
+          out.gain.setTargetAtTime(0, now, 0.08);
+          oscs.forEach((o) => { try { o.stop(now + 0.4); } catch (e) {} });
+          setTimeout(() => { try { out.disconnect(); } catch (e) {} }, 600);
+        },
+      };
+    },
+
+    // Dry electrical crackle: a short cluster of tiny noise ticks, the sound
+    // of a live wire arcing somewhere in the wreckage.
+    crackle(ac, dest) {
+      const t = ac.currentTime;
+      const len = ac.sampleRate * 0.35 | 0;
+      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      const d = buf.getChannelData(0);
+      const ticks = 5 + (Math.random() * 9 | 0);
+      for (let k = 0; k < ticks; k++) {
+        // clustered, accelerating pops — arcs come in bursts, not evenly
+        const at = Math.pow(Math.random(), 1.6) * (len - 400) | 0;
+        const tl = 40 + (Math.random() * 260 | 0);
+        const amp = rand(0.3, 1);
+        for (let i = 0; i < tl; i++) d[at + i] += (Math.random() * 2 - 1) * amp * Math.pow(1 - i / tl, 2);
+      }
+      const src = ac.createBufferSource();
+      src.buffer = buf;
+      const hp = ac.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = rand(1500, 2800);
+      const out = ac.createGain();
+      out.gain.value = rand(0.12, 0.22);
+      src.connect(hp).connect(out).connect(dest || ac.destination);
+      src.start(t);
+    },
+
+    // Throw sparks out of a random remembered breach (ambient arcing). Returns
+    // where, or null if nothing has been breached yet.
+    randomSpark() {
+      if (!breaches.length) return null;
+      const b = pick(breaches);
+      const x = b.x + rand(-b.r * 0.5, b.r * 0.5), y = b.y + rand(-b.r * 0.5, b.r * 0.5);
+      this.spark(x, y, 4 + (Math.random() * 6 | 0));
+      if (Math.random() < 0.3) glitchUntil = performance.now() + rand(80, 200);
+      return { x: x, y: y };
     },
 
     // Animated bits, driven by the engine's fx loop. `fg` = transient fx canvas,
@@ -384,12 +665,15 @@
       // flicker: exposed panel areas pulse; occasional glitch band tears across
       let flickering = false;
       for (const b of breaches) {
-        if (b.depth < 1 || b.depth >= 3) continue; // only live panel/backlight flickers
+        // the data layers (L6–L2) flicker with traffic; L1 is dead metal and
+        // only ever sparks
+        const lc = layerCount(b.depth);
+        if (lc < 1 || lc >= STRATA.length) continue;
         if (Math.random() < 0.06) {
           flickering = true;
           fg.save();
           fg.globalCompositeOperation = 'lighter';
-          fg.fillStyle = 'rgba(120,170,255,' + rand(0.05, 0.16).toFixed(2) + ')';
+          fg.fillStyle = 'hsla(' + [300, 230, 165, 270, 130][lc - 1] + ',90%,65%,' + rand(0.05, 0.16).toFixed(2) + ')';
           blobPath(fg, b.x, b.y, b.r * 0.9, 0.15);
           fg.fill();
           fg.restore();

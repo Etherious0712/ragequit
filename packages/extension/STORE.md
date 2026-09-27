@@ -43,6 +43,10 @@ arm it, then go to town:
 🐛 Termites — a swarm that eats holes on its own
 🧨 Dynamite — plant a fuse, then flash-bang-crater the whole screen
 
+Keep hitting one spot to dig down the OSI stack — from the Application layer through
+packets, routing tables and raw bits, all the way to the Physical layer's copper and
+circuit board — while the exposed electronics hum and crackle.
+
 Save a screenshot of your carnage with one click. Mute or tune the sound. Hit R to
 reset, Esc to quit. That's it — no accounts, no tracking, no data collection.
 
@@ -69,6 +73,8 @@ web page when the user activates it from the toolbar.
 - Does NOT use remote code (everything ships in the package; no external scripts/fetches).
 - The "save screenshot" feature composites the image locally and hands it to the
   browser's download — it is never uploaded anywhere.
+- The "send feedback" button opens a `mailto:` draft in the user's own mail app;
+  the extension itself sends nothing.
 
 **Privacy policy URL** — the store may require one even though no data is handled.
 Point it at the repo's privacy note:
@@ -96,7 +102,7 @@ your Downloads folder at exactly 1280×800.
 | Button | Shows |
 |---|---|
 | 1 mixed | glass, bullet holes, a hammered breach and paint splats together |
-| 2 hardware | one spot dug clean through — LCD, backlight, PCB, chassis |
+| 2 hardware | one spot dug clean through — every OSI layer from L6 down to L1 |
 | 3 machine gun | a sweeping burst with bullet holes and brass casings |
 | 4 burn | flamethrower char and smoke plus a chainsaw gash |
 | 5 dynamite | crater and edge cracks (wait ~2s for the fuse, *then* download) |

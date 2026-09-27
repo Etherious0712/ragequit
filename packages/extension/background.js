@@ -17,4 +17,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true; // keep the message channel open for the async response
   }
+  // Feedback: open the pre-filled mailto: draft. Only drafts addressed to the
+  // developer are accepted, so the page can't use this to open arbitrary URLs.
+  if (msg && msg.type === 'ragequit-mail' && sender.tab && isFeedbackMail(msg.url)) {
+    chrome.tabs.create({ url: msg.url, index: sender.tab.index + 1 }).catch(() => {});
+  }
 });
+
+// Exactly `mailto:<developer>?subject=…&body=…` — no extra params, so nothing
+// can slip in a cc/bcc/to recipient or a different scheme.
+function isFeedbackMail(url) {
+  const pre = 'mailto:etherious0712@gmail.com?';
+  if (typeof url !== 'string' || url.length >= 8000 || !url.startsWith(pre)) return false;
+  const keys = url.slice(pre.length).split('&').map((p) => p.split('=')[0]);
+  return keys.length === 2 && keys[0] === 'subject' && keys[1] === 'body' && !/[\s#]/.test(url);
+}

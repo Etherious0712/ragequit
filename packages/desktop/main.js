@@ -5,6 +5,16 @@ const path = require('path');
 const https = require('https');
 
 const REPO = 'Etherious0712/ragequit';
+const FEEDBACK_TO = 'etherious0712@gmail.com';
+
+// Exactly `mailto:<developer>?subject=…&body=…` — no extra params, so nothing
+// can slip in a cc/bcc/to recipient or a different scheme.
+function isFeedbackMail(url) {
+  const pre = 'mailto:' + FEEDBACK_TO + '?';
+  if (typeof url !== 'string' || url.length >= 8000 || !url.startsWith(pre)) return false;
+  const keys = url.slice(pre.length).split('&').map((p) => p.split('=')[0]);
+  return keys.length === 2 && keys[0] === 'subject' && keys[1] === 'body' && !/[\s#]/.test(url);
+}
 
 // numeric x.y.z compare: is `a` newer than `b`?
 function isNewer(a, b) {
@@ -79,6 +89,7 @@ async function start() {
   const shot = source.thumbnail.toDataURL();
 
   ipcMain.handle('smash:shot', () => shot);
+  ipcMain.handle('smash:info', () => ({ platform: 'desktop', version: app.getVersion() }));
   ipcMain.on('smash:quit', () => app.quit());
 
   const win = new BrowserWindow({
@@ -97,6 +108,16 @@ async function start() {
       nodeIntegration: false,
     },
   });
+  // Feedback: hand the pre-filled mailto: draft to the OS mail app. Only drafts
+  // to the developer's address pass, so the renderer can't open arbitrary URLs.
+  // Drop always-on-top first, or the mail window opens hidden behind us.
+  ipcMain.on('smash:mail', (e, url) => {
+    if (!isFeedbackMail(url)) return;
+    if (!win.isDestroyed()) win.setAlwaysOnTop(false);
+    shell.openExternal(url).catch(() => {});
+  });
+  // ...and pin it back on top once the user returns to the toy
+  win.on('focus', () => { if (!win.isAlwaysOnTop()) win.setAlwaysOnTop(true); });
   win.loadFile('index.html');
   // check for updates a moment after the toy is up (packaged builds only — no
   // network chatter or nag dialogs during `npm start` development)

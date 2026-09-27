@@ -29,19 +29,25 @@ Pick a weapon from the slim toolbar on the left edge (hover to reveal it), or pr
 | 9 | **Termites** | Drop a swarm that wanders and gnaws holes on its own. |
 | 0 | **Dynamite** | Plant a stick with a burning fuse — flash, screen-shake, crater, cracks to the edges. |
 
-## Break all the way through
+## Break all the way down the OSI stack
 
-Damage has depth. Keep working the same spot and you punch clean through the screen into
-the hardware behind it — cracked glass gives way to the LCD panel (subpixel grid, bleeding
-crystal), then the glowing backlight sheet, then the circuit board, and finally the bare
-chassis with loose wires. Sparks spit from fresh breaches, glass shards drop away, and
-ribbon cables dangle out of the deep tears.
+Damage has depth, and the layers are the OSI model. The screen you're looking at is
+**L7 Application**. Keep working the same spot and you dig down one layer at a time:
+**L6 Presentation** (JPEG blocks, hex dumps, mojibake), **L5 Session** (keep-alive links,
+session tokens), **L4 Transport** (SYN/ACK segments, ports), **L3 Network** (a routing graph
+of IP addresses), **L2 Data Link** (raw bitstream, MAC addresses) and finally
+**L1 Physical** (the circuit board, twisted copper, a snapped fibre, the bare chassis). A HUD
+in the top-right corner shows the deepest layer you've reached. Sparks spit from fresh
+breaches, shards drop away, and ribbon cables dangle out of the deep tears.
+
+Once the screen is breached, the exposed electronics hum (louder the more you've torn
+open) and crackle with random arcs of sparks.
 
 Every weapon digs at its own rate: a bullet punches through in a couple of shots, dynamite
-craters straight to the chassis, termites slowly eat their way in, and paintball never gets
+craters straight to L1, termites slowly eat their way in, and paintball never gets
 past the surface — it's paint.
 
-The toolbar also has a 📷 button to save a screenshot of your carnage (page/desktop + damage composited into a PNG), and a speaker button to mute or adjust volume (remembered across sessions).
+The toolbar also has a 📷 button to save a screenshot of your carnage (page/desktop + damage composited into a PNG), a ✉ button to send feedback (opens a pre-filled draft in your mail app), and a speaker button to mute or adjust volume (remembered across sessions).
 
 ## Try it
 
@@ -57,6 +63,9 @@ the browser. The extension only touches a page after you click its toolbar butto
 (`activeTab`), and the "save screenshot" feature composites the image locally and hands
 it straight to your browser's download; it is never uploaded anywhere. The desktop app's
 only network call is an optional check of GitHub Releases for a newer version.
+The "send feedback" button just opens a pre-filled draft in *your* mail app (a
+`mailto:` link, with the app version and browser user agent in the body); nothing is
+sent unless you review it and press send yourself.
 
 ## Development
 
